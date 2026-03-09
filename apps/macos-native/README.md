@@ -15,6 +15,27 @@ Keep macOS on a native Swift/SwiftUI host while leaving the existing Electron ap
 
 The shared product/backend surface remains the existing T3 Code server and contracts layers elsewhere in the monorepo.
 
+## What is already native
+
+- SwiftUI app entry point and window shell
+- backend bootstrap configuration in Swift
+- backend path/state resolution in Swift
+- login-shell PATH resolution in Swift
+- loopback port reservation and auth token generation in Swift
+- backend process supervision in Swift
+- rotating log handling in Swift
+
+## What is still missing before this is a fully functional app
+
+- the real native session/conversation UI instead of the current status shell
+- native client orchestration for the full app flow
+- native menus, dialogs, folder picking, and context menus
+- native auto-update flow
+- native deep-link/protocol handling and full window lifecycle parity
+- feature parity validation against the existing Electron desktop app
+
+So: **SwiftUI has started**, but the native app is **not** feature-complete yet.
+
 ## Requirements
 
 - macOS 14 or newer
