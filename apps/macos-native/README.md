@@ -11,6 +11,7 @@ Keep macOS on a native Swift/SwiftUI host while leaving the existing Electron ap
 - native macOS app entry point
 - native window lifecycle owned by SwiftUI
 - room to move desktop shell responsibilities out of Electron incrementally without disrupting the current Windows/Linux app
+- native runtime bootstrap for backend launch configuration, login-shell PATH resolution, rotating logs, and process supervision
 
 The shared product/backend surface remains the existing T3 Code server and contracts layers elsewhere in the monorepo.
 
