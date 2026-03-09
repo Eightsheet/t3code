@@ -5,7 +5,7 @@ import XCTest
 
 final class DesktopRuntimeBootstrapperTests: XCTestCase {
   func testPrepareBuildsBackendLaunchEnvironment() throws {
-    let rootURL = makeTemporaryDirectory()
+    let rootURL = try makeTemporaryDirectory(testCase: self)
     let serverDirectory = rootURL.appendingPathComponent("apps/server/dist", isDirectory: true)
     try FileManager.default.createDirectory(at: serverDirectory, withIntermediateDirectories: true)
     try "{}".write(
@@ -40,12 +40,5 @@ final class DesktopRuntimeBootstrapperTests: XCTestCase {
     XCTAssertEqual(configuration.authToken.count, 48)
     XCTAssertTrue(configuration.port > 0)
     XCTAssertEqual(configuration.websocketURL.scheme, "ws")
-  }
-
-  private func makeTemporaryDirectory() -> URL {
-    let url = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
   }
 }

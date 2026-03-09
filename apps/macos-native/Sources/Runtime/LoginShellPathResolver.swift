@@ -5,7 +5,7 @@ public enum LoginShellPathResolver {
     environment: [String: String] = ProcessInfo.processInfo.environment
   ) -> String? {
     let shell = environment["SHELL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolvedShell = shell?.isEmpty == false ? shell! : "/bin/zsh"
+    let resolvedShell = shell.flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
     return try? readPath(shell: resolvedShell, environment: environment)
   }
 

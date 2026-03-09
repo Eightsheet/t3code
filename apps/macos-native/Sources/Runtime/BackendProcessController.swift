@@ -12,13 +12,24 @@ public enum BackendProcessControllerError: Error, Equatable {
 }
 
 public final class BackendProcessController: @unchecked Sendable {
-  public var onExit: (@Sendable (Int32) -> Void)?
-  public private(set) var process: Process?
-  public private(set) var restartAttempt = 0
+  public var onExit: (@Sendable (Int32) -> Void)? {
+    get { stateLock.withLock { exitHandler } }
+    set { stateLock.withLock { exitHandler = newValue } }
+  }
+  public var process: Process? {
+    stateLock.withLock { currentProcess }
+  }
+  public var restartAttempt: Int {
+    stateLock.withLock { currentRestartAttempt }
+  }
 
   private let fileManager: FileManager
   private let desktopLogSink: RotatingFileSink?
   private let backendLogSink: RotatingFileSink?
+  private let stateLock = NSLock()
+  private var exitHandler: (@Sendable (Int32) -> Void)?
+  private var currentProcess: Process?
+  private var currentRestartAttempt = 0
 
   public init(
     fileManager: FileManager = .default,
@@ -31,7 +42,7 @@ public final class BackendProcessController: @unchecked Sendable {
   }
 
   public func start(configuration: DesktopRuntimeConfiguration) throws {
-    if let process, process.isRunning {
+    if stateLock.withLock({ currentProcess?.isRunning == true }) {
       throw BackendProcessControllerError.alreadyRunning
     }
 
@@ -58,14 +69,19 @@ public final class BackendProcessController: @unchecked Sendable {
         phase: "END",
         details: "pid=\(process.processIdentifier) status=\(process.terminationStatus)"
       )
-      self?.process = nil
-      self?.restartAttempt += 1
-      self?.onExit?(process.terminationStatus)
+      let onExit = self?.stateLock.withLock { () -> ((Int32) -> Void)? in
+        self?.currentProcess = nil
+        self?.currentRestartAttempt += 1
+        return self?.exitHandler
+      }
+      onExit?(process.terminationStatus)
     }
 
     try process.run()
-    self.process = process
-    restartAttempt = 0
+    stateLock.withLock {
+      currentProcess = process
+      currentRestartAttempt = 0
+    }
 
     logDesktop("backend launch requested path=\(configuration.paths.backendEntry.path)")
     logBackendBoundary(
@@ -76,7 +92,7 @@ public final class BackendProcessController: @unchecked Sendable {
   }
 
   public func stop(gracePeriod: TimeInterval = 2.0) {
-    guard let process else {
+    guard let process = stateLock.withLock({ currentProcess }) else {
       return
     }
 
@@ -86,7 +102,7 @@ public final class BackendProcessController: @unchecked Sendable {
 
     let deadline = Date().addingTimeInterval(gracePeriod)
     while process.isRunning && Date() < deadline {
-      _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+      _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
     }
 
     if process.isRunning {
@@ -132,7 +148,7 @@ public final class BackendProcessController: @unchecked Sendable {
   }
 
   private func timestamp() -> String {
-    ISO8601DateFormatter().string(from: Date())
+    Date().ISO8601Format()
   }
 
   private func forceKill(pid: Int32) {

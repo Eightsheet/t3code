@@ -13,6 +13,7 @@ public struct RotatingFileSinkOptions: Sendable {
 }
 
 public final class RotatingFileSink: @unchecked Sendable {
+  private let lock = NSLock()
   private let fileManager: FileManager
   private let fileURL: URL
   private let maxBytes: Int
@@ -49,23 +50,25 @@ public final class RotatingFileSink: @unchecked Sendable {
       return
     }
 
-    if currentSize > 0 && currentSize + data.count > maxBytes {
-      try rotate()
-    }
+    try lock.withLock {
+      if currentSize > 0 && currentSize + data.count > maxBytes {
+        try rotate()
+      }
 
-    if fileManager.fileExists(atPath: fileURL.path) == false {
-      _ = fileManager.createFile(atPath: fileURL.path, contents: nil)
-    }
+      if fileManager.fileExists(atPath: fileURL.path) == false {
+        _ = fileManager.createFile(atPath: fileURL.path, contents: nil)
+      }
 
-    let handle = try FileHandle(forWritingTo: fileURL)
-    defer { try? handle.close() }
+      let handle = try FileHandle(forWritingTo: fileURL)
+      defer { try? handle.close() }
 
-    try handle.seekToEnd()
-    try handle.write(contentsOf: data)
-    currentSize += data.count
+      try handle.seekToEnd()
+      try handle.write(contentsOf: data)
+      currentSize += data.count
 
-    if currentSize > maxBytes {
-      try rotate()
+      if currentSize > maxBytes {
+        try rotate()
+      }
     }
   }
 

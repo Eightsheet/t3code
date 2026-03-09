@@ -94,10 +94,8 @@ public enum DesktopRuntimeBootstrapper {
   }
 
   private static func generateHexToken(byteCount: Int) -> String {
-    let generator = SystemRandomNumberGenerator()
-    var mutableGenerator = generator
     let bytes = (0..<byteCount).map { _ in
-      UInt8.random(in: .min ... .max, using: &mutableGenerator)
+      UInt8.random(in: .min ... .max)
     }
     return bytes.map { String(format: "%02x", $0) }.joined()
   }

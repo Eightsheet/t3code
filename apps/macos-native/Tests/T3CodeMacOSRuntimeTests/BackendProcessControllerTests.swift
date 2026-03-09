@@ -5,7 +5,7 @@ import XCTest
 
 final class BackendProcessControllerTests: XCTestCase {
   func testStartLaunchesProcessAndWritesLaunchLogs() throws {
-    let directory = makeTemporaryDirectory()
+    let directory = try makeTemporaryDirectory(testCase: self)
     let scriptURL = directory.appendingPathComponent("backend.sh", isDirectory: false)
     try "#!/bin/sh\nprintf 'ready from swift runtime\\n'\n".write(
       to: scriptURL,
@@ -41,8 +41,8 @@ final class BackendProcessControllerTests: XCTestCase {
         stateDirectory: directory,
         logDirectory: directory
       ),
-      executableURL: URL(fileURLWithPath: "/bin/sh", isDirectory: false),
-      arguments: [scriptURL.path],
+      executableURL: URL(fileURLWithPath: "/usr/bin/env", isDirectory: false),
+      arguments: ["sh", scriptURL.path],
       environment: [:],
       authToken: "token",
       port: 4321,
@@ -60,10 +60,12 @@ final class BackendProcessControllerTests: XCTestCase {
     XCTAssertTrue(backendLog.contains("port=4321"))
   }
 
-  private func makeTemporaryDirectory() -> URL {
-    let url = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
+  func testRestartDelayUsesExponentialBackoffWithCap() {
+    XCTAssertEqual(BackendProcessController.restartDelay(forAttempt: 0), 0)
+    XCTAssertEqual(BackendProcessController.restartDelay(forAttempt: 1), 0.5)
+    XCTAssertEqual(BackendProcessController.restartDelay(forAttempt: 2), 1)
+    XCTAssertEqual(BackendProcessController.restartDelay(forAttempt: 3), 2)
+    XCTAssertEqual(BackendProcessController.restartDelay(forAttempt: 6), 10)
+    XCTAssertEqual(BackendProcessController.restartDelay(forAttempt: 10), 10)
   }
 }
