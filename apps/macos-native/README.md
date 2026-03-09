@@ -14,6 +14,11 @@ Keep macOS on a native Swift/SwiftUI host while leaving the existing Electron ap
 
 The shared product/backend surface remains the existing T3 Code server and contracts layers elsewhere in the monorepo.
 
+## Requirements
+
+- macOS 14 or newer
+- Swift 6 toolchain / Xcode 16+ for local native builds
+
 ## Run locally
 
 ```bash

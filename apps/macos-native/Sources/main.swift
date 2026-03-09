@@ -8,7 +8,7 @@ struct T3CodeMacOSApp: App {
       ContentView()
         .frame(minWidth: 960, minHeight: 640)
     }
-    .windowResizability(.contentSize)
+    .windowResizability(.contentMinSize)
   }
 }
 
@@ -26,7 +26,7 @@ private struct ContentView: View {
       .fixedSize(horizontal: false, vertical: true)
 
       VStack(alignment: .leading, spacing: 10) {
-        Label("Native macOS window lifecycle and app shell", systemImage: "macwindow")
+        Label("Native macOS window lifecycle and app shell", systemImage: "macwindow.badge.plus")
         Label("Shared backend and protocol layers stay in the existing monorepo packages", systemImage: "arrow.triangle.branch")
         Label("Electron desktop build remains available for non-macOS targets", systemImage: "shippingbox")
       }
