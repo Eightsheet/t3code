@@ -28,13 +28,14 @@ The shared product/backend surface remains the existing T3 Code server and contr
 - app identity, commit metadata, and user-data path resolution in Swift
 - secure static asset bundle resolution in Swift
 - desktop update state machine and polling orchestration in Swift
+- GitHub release manifest parsing, update download, and install handoff in Swift
+- backend lifecycle restart/shutdown orchestration in Swift
 
 ## What is still missing before this is a fully functional app
 
 - the real native session/conversation UI instead of the current status shell
 - native client orchestration for the full app flow
 - native menus, dialogs, folder picking, and context menus
-- native updater transport/provider integration and install handoff
 - native deep-link/protocol handling and full window lifecycle parity
 - feature parity validation against the existing Electron desktop app
 

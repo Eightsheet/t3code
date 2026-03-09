@@ -34,6 +34,7 @@ final class DesktopRuntimeBootstrapperTests: XCTestCase {
     XCTAssertEqual(configuration.paths.appRoot.path, rootURL.path)
     XCTAssertEqual(configuration.paths.backendEntry.path, serverDirectory.appendingPathComponent("index.mjs").path)
     XCTAssertEqual(configuration.environment["T3CODE_MODE"], "desktop")
+    XCTAssertEqual(configuration.environment["T3CODE_NO_BROWSER"], "1")
     XCTAssertEqual(configuration.environment["T3CODE_STATE_DIR"], stateDirectory.path)
     XCTAssertEqual(configuration.executableURL.path, "/usr/bin/node")
     XCTAssertEqual(configuration.arguments, [configuration.paths.backendEntry.path])

@@ -1,9 +1,11 @@
 #if canImport(SwiftUI) && os(macOS)
+import AppKit
 import SwiftUI
 import T3CodeMacOSRuntime
 
 @main
 struct T3CodeMacOSApp: App {
+  @StateObject private var runtimeModel = DesktopRuntimeModel()
   private let bootstrap = DesktopRuntimeBootstrapper.prepareOrNil()
   private let status = DesktopMigrationStatus.current
   private let runtimeInfo = DesktopRuntimeInfoResolver.current()
@@ -19,9 +21,16 @@ struct T3CodeMacOSApp: App {
         runtimeInfo: runtimeInfo,
         metadata: metadata,
         staticRoot: staticRoot,
-        updateAvailability: updateAvailability
+        updateAvailability: updateAvailability,
+        runtimeSnapshot: runtimeModel.snapshot
       )
-        .frame(minWidth: 960, minHeight: 640)
+      .frame(minWidth: 960, minHeight: 640)
+      .task {
+        await runtimeModel.start()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+        runtimeModel.stop()
+      }
     }
     .windowResizability(.contentMinSize)
   }
@@ -34,6 +43,7 @@ private struct ContentView: View {
   let metadata: DesktopAppMetadata?
   let staticRoot: URL?
   let updateAvailability: String?
+  let runtimeSnapshot: DesktopRuntimeSessionSnapshot
 
   var body: some View {
     ScrollView {
@@ -73,6 +83,13 @@ private struct ContentView: View {
         }
         LabeledContent("Static bundle root", value: staticRoot?.path ?? "unavailable")
         LabeledContent("Auto-update readiness", value: updateAvailability ?? "ready for packaged production builds")
+        LabeledContent("Runtime session", value: runtimeSnapshot.lifecycle.rawValue)
+        if let message = runtimeSnapshot.message {
+          LabeledContent("Runtime message", value: message)
+        }
+        if let updateState = runtimeSnapshot.updateState {
+          LabeledContent("Update controller status", value: updateState.status.rawValue)
+        }
 
         if let bootstrap {
           Divider()
@@ -115,6 +132,54 @@ private struct StatusCard: View {
     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
   }
 }
+
+@MainActor
+private final class DesktopRuntimeModel: ObservableObject {
+  @Published private(set) var snapshot = DesktopRuntimeSessionSnapshot(
+    lifecycle: .idle,
+    message: nil,
+    restartAttempt: 0,
+    websocketURL: nil,
+    backendEntry: nil,
+    updateState: nil
+  )
+
+  private let session: DesktopRuntimeSession?
+  private var hasStarted = false
+
+  init() {
+    if let options = AppPreviewContext.current.runtimeSessionOptions {
+      session = DesktopRuntimeSession(options: options)
+      Task { [weak self] in
+        await self?.session?.setOnStateChanged { snapshot in
+          Task { @MainActor in
+            self?.snapshot = snapshot
+          }
+        }
+      }
+    } else {
+      session = nil
+    }
+  }
+
+  func start() async {
+    guard hasStarted == false, let session else {
+      return
+    }
+    hasStarted = true
+    await session.start()
+    snapshot = await session.currentSnapshot()
+  }
+
+  func stop() {
+    guard let session else {
+      return
+    }
+    Task {
+      await session.stop()
+    }
+  }
+}
 #else
 import Foundation
 import T3CodeMacOSRuntime
@@ -126,6 +191,7 @@ struct T3CodeMacOSUnsupportedHost {
     let bootstrap = DesktopRuntimeBootstrapper.prepareOrNil()
     let runtimeInfo = DesktopRuntimeInfoResolver.current()
     let previewContext = AppPreviewContext.current
+    let runtimeSessionOptions = AppPreviewContext.current.runtimeSessionOptions
     print(status.headline)
     print(status.swiftUIStatus)
     print("")
@@ -149,6 +215,7 @@ struct T3CodeMacOSUnsupportedHost {
     }
     print("- static bundle root: \(previewContext.staticRoot?.path ?? "unavailable")")
     print("- auto-update readiness: \(previewContext.updateAvailability ?? "ready for packaged production builds")")
+    print("- runtime session orchestration: \(runtimeSessionOptions == nil ? "unavailable in this launch context" : "native runtime session available")")
     if let bootstrap {
       print("")
       print("Prepared native macOS runtime bootstrap for \(bootstrap.paths.backendEntry.path)")
@@ -165,6 +232,7 @@ private struct AppPreviewContext {
   let metadata: DesktopAppMetadata?
   let staticRoot: URL?
   let updateAvailability: String?
+  let runtimeSessionOptions: DesktopRuntimeSessionOptions?
 
   static let current: AppPreviewContext = {
     let environment = ProcessInfo.processInfo.environment
@@ -179,19 +247,26 @@ private struct AppPreviewContext {
       platformIdentifier: AppPreviewContext.platformIdentifier(),
       appRoot: appRoot
     )
-    let updateAvailability = DesktopUpdatePolicy.disabledReason(
-      for: DesktopUpdateEnvironment(
-        isDevelopment: environment["VITE_DEV_SERVER_URL"] != nil,
-        isPackaged: AppPreviewContext.isPackagedBuild(),
-        platformIdentifier: AppPreviewContext.platformIdentifier(),
-        appImagePath: environment["APPIMAGE"],
-        disabledByEnvironment: environment["T3CODE_DISABLE_AUTO_UPDATE"] == "1"
-      )
+    let updateEnvironment = DesktopUpdateEnvironment(
+      isDevelopment: environment["VITE_DEV_SERVER_URL"] != nil,
+      isPackaged: AppPreviewContext.isPackagedBuild(),
+      platformIdentifier: AppPreviewContext.platformIdentifier(),
+      appImagePath: environment["APPIMAGE"],
+      disabledByEnvironment: environment["T3CODE_DISABLE_AUTO_UPDATE"] == "1"
     )
+    let updateAvailability = DesktopUpdatePolicy.disabledReason(for: updateEnvironment)
     return AppPreviewContext(
       metadata: metadata,
       staticRoot: DesktopStaticAssetResolver.resolveStaticRoot(appRoot: appRoot),
-      updateAvailability: updateAvailability
+      updateAvailability: updateAvailability,
+      runtimeSessionOptions: DesktopRuntimeSessionOptions(
+        environment: environment,
+        currentVersion: AppPreviewContext.currentVersion(),
+        runtimeInfo: DesktopRuntimeInfoResolver.current(),
+        updateEnvironment: updateEnvironment,
+        currentDirectoryURL: appRoot,
+        shouldEnablePackagedLogging: AppPreviewContext.isPackagedBuild()
+      )
     )
   }()
 

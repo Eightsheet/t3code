@@ -412,6 +412,10 @@ public actor DesktopUpdateController {
     state
   }
 
+  public func setOnStateChanged(_ handler: @escaping @Sendable (DesktopUpdateState) -> Void) {
+    onStateChanged = handler
+  }
+
   public func startPolling() {
     guard state.enabled else {
       emitStateChange()

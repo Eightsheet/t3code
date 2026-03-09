@@ -52,6 +52,7 @@ public enum DesktopRuntimeBootstrapper {
       backendEnvironment["PATH"] = inheritedPath
     }
     backendEnvironment["T3CODE_MODE"] = "desktop"
+    backendEnvironment["T3CODE_NO_BROWSER"] = "1"
     backendEnvironment["T3CODE_PORT"] = String(port)
     backendEnvironment["T3CODE_AUTH_TOKEN"] = authToken
     backendEnvironment["T3CODE_STATE_DIR"] = paths.stateDirectory.path
