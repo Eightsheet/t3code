@@ -18,8 +18,10 @@ enum T3Design {
 
   enum Colors {
     static let background = Color(nsColor: .windowBackgroundColor)
+    static let surface = Color(nsColor: .controlBackgroundColor)
     static let surfacePrimary = Color(nsColor: .controlBackgroundColor)
     static let surfaceSecondary = Color(nsColor: .underPageBackgroundColor)
+    static let surfaceTertiary = Color(nsColor: .gridColor).opacity(0.3)
     static let textPrimary = Color(nsColor: .labelColor)
     static let textSecondary = Color(nsColor: .secondaryLabelColor)
     static let textTertiary = Color(nsColor: .tertiaryLabelColor)

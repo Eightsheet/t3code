@@ -17,7 +17,7 @@ final class DesktopMigrationStatusTests: XCTestCase {
     )
     XCTAssertTrue(
       status.missingForFullApp.contains(
-        "Terminal emulator integration in native macOS (SwiftTerm or equivalent)"
+        "Terminal emulator integration (SwiftTerm or equivalent for real xterm I/O)"
       )
     )
   }

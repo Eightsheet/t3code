@@ -52,6 +52,43 @@ enum ActivityTone: String, Codable, Sendable {
   case error
 }
 
+enum EnvMode: String, Codable, Sendable {
+  case local
+  case worktree
+}
+
+enum AppTheme: String, Codable, Sendable {
+  case system
+  case light
+  case dark
+}
+
+enum ScriptIcon: String, Codable, Sendable, CaseIterable {
+  case play
+  case test
+  case lint
+  case build
+  case debug
+  case configure
+
+  var systemImage: String {
+    switch self {
+    case .play: "play.fill"
+    case .test: "checkmark.circle"
+    case .lint: "wand.and.stars"
+    case .build: "hammer.fill"
+    case .debug: "ant.fill"
+    case .configure: "gearshape.fill"
+    }
+  }
+}
+
+enum GitPRState: String, Codable, Sendable {
+  case open
+  case merged
+  case closed
+}
+
 // MARK: - Core Data Models
 
 struct ChatAttachment: Codable, Identifiable, Sendable {
@@ -76,6 +113,7 @@ struct ProjectScript: Codable, Identifiable, Sendable {
   let command: String
   let icon: String
   let runOnWorktreeCreate: Bool
+  var keybinding: String?
 }
 
 struct OrchestrationProject: Codable, Identifiable, Sendable {
@@ -87,6 +125,89 @@ struct OrchestrationProject: Codable, Identifiable, Sendable {
   let createdAt: String
   let updatedAt: String
   let deletedAt: String?
+}
+
+// MARK: - Git Models
+
+struct GitBranch: Codable, Identifiable, Sendable {
+  var id: String { name }
+  let name: String
+  let isCurrent: Bool
+  let isDefault: Bool
+}
+
+struct GitStatus: Codable, Sendable {
+  let branch: String?
+  let ahead: Int
+  let behind: Int
+  let hasChanges: Bool
+  let changedFiles: [GitChangedFile]
+  let prState: GitPRState?
+  let prUrl: String?
+}
+
+struct GitChangedFile: Codable, Identifiable, Sendable {
+  var id: String { path }
+  let path: String
+  let status: String
+  let additions: Int
+  let deletions: Int
+}
+
+// MARK: - Diff Models
+
+struct FileDiff: Codable, Identifiable, Sendable {
+  var id: String { path }
+  let path: String
+  let oldPath: String?
+  let kind: String
+  let additions: Int
+  let deletions: Int
+  let hunks: [DiffHunk]
+}
+
+struct DiffHunk: Codable, Identifiable, Sendable {
+  let id: String
+  let header: String
+  let lines: [DiffLine]
+}
+
+struct DiffLine: Codable, Identifiable, Sendable {
+  let id: String
+  let type: String
+  let content: String
+  let oldLineNumber: Int?
+  let newLineNumber: Int?
+}
+
+// MARK: - Terminal Models
+
+struct TerminalInfo: Identifiable, Sendable {
+  let id: String
+  let label: String
+  var isRunning: Bool
+}
+
+// MARK: - App Settings
+
+struct AppSettings: Codable, Sendable {
+  var theme: AppTheme = .system
+  var codexBinaryPath: String?
+  var codexHomePath: String?
+  var defaultServiceTier: String = "standard"
+  var customModelSlugs: [String] = []
+  var streamAssistantMessages: Bool = true
+  var confirmThreadDelete: Bool = true
+}
+
+// MARK: - Draft Thread
+
+struct DraftThread: Sendable {
+  let projectId: ProjectId
+  let branch: String?
+  let worktreePath: String?
+  let envMode: EnvMode
+  var composerText: String
 }
 
 struct OrchestrationMessage: Codable, Identifiable, Sendable {
@@ -291,7 +412,9 @@ enum CommandBuilder {
     title: String,
     model: String,
     runtimeMode: RuntimeMode,
-    interactionMode: InteractionMode = .default
+    interactionMode: InteractionMode = .default,
+    branch: String? = nil,
+    worktreePath: String? = nil
   ) -> [String: Any] {
     [
       "_tag": "thread.create",
@@ -303,8 +426,8 @@ enum CommandBuilder {
       "model": model,
       "runtimeMode": runtimeMode.rawValue,
       "interactionMode": interactionMode.rawValue,
-      "branch": NSNull(),
-      "worktreePath": NSNull(),
+      "branch": branch as Any? ?? NSNull(),
+      "worktreePath": worktreePath as Any? ?? NSNull(),
       "createdAt": ISO8601DateFormatter().string(from: Date()),
     ]
   }
@@ -365,5 +488,95 @@ enum CommandBuilder {
     if let title { body["title"] = title }
     if let model { body["model"] = model }
     return body
+  }
+
+  // MARK: - Project Commands
+
+  static func projectAdd(projectId: ProjectId, path: String, title: String) -> [String: Any] {
+    [
+      "_tag": "project.add",
+      "type": "project.add",
+      "commandId": UUID().uuidString,
+      "projectId": projectId,
+      "workspaceRoot": path,
+      "title": title,
+    ]
+  }
+
+  static func projectDelete(projectId: ProjectId) -> [String: Any] {
+    [
+      "_tag": "project.delete",
+      "type": "project.delete",
+      "commandId": UUID().uuidString,
+      "projectId": projectId,
+    ]
+  }
+
+  // MARK: - Script Commands
+
+  static func projectScriptAdd(
+    projectId: ProjectId, scriptId: String, name: String, command: String, icon: String,
+    runOnWorktreeCreate: Bool = false
+  ) -> [String: Any] {
+    [
+      "_tag": "project.script.add",
+      "type": "project.script.add",
+      "commandId": UUID().uuidString,
+      "projectId": projectId,
+      "scriptId": scriptId,
+      "name": name,
+      "command": command,
+      "icon": icon,
+      "runOnWorktreeCreate": runOnWorktreeCreate,
+    ]
+  }
+
+  static func projectScriptUpdate(
+    projectId: ProjectId, scriptId: String, name: String, command: String, icon: String,
+    runOnWorktreeCreate: Bool = false
+  ) -> [String: Any] {
+    [
+      "_tag": "project.script.update",
+      "type": "project.script.update",
+      "commandId": UUID().uuidString,
+      "projectId": projectId,
+      "scriptId": scriptId,
+      "name": name,
+      "command": command,
+      "icon": icon,
+      "runOnWorktreeCreate": runOnWorktreeCreate,
+    ]
+  }
+
+  static func projectScriptDelete(projectId: ProjectId, scriptId: String) -> [String: Any] {
+    [
+      "_tag": "project.script.delete",
+      "type": "project.script.delete",
+      "commandId": UUID().uuidString,
+      "projectId": projectId,
+      "scriptId": scriptId,
+    ]
+  }
+
+  // MARK: - Approval Commands
+
+  static func threadTurnApprove(threadId: ThreadId, approvalRequestId: ApprovalRequestId) -> [String: Any] {
+    [
+      "_tag": "thread.turn.approve",
+      "type": "thread.turn.approve",
+      "commandId": UUID().uuidString,
+      "threadId": threadId,
+      "approvalRequestId": approvalRequestId,
+    ]
+  }
+
+  static func threadTurnReject(threadId: ThreadId, approvalRequestId: ApprovalRequestId) -> [String: Any] {
+    [
+      "_tag": "thread.turn.reject",
+      "type": "thread.turn.reject",
+      "commandId": UUID().uuidString,
+      "threadId": threadId,
+      "approvalRequestId": approvalRequestId,
+    ]
   }
 }

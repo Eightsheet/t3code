@@ -1,10 +1,12 @@
 #if canImport(SwiftUI) && os(macOS)
+import AppKit
 import SwiftUI
 
 // MARK: - Thread Sidebar
 
 struct ThreadSidebar: View {
   @ObservedObject var store: AppStore
+  @ObservedObject var runtimeModel: DesktopRuntimeModel
   @State private var searchText = ""
   @State private var hoveredThreadId: ThreadId?
   @State private var renamingThreadId: ThreadId?
@@ -42,8 +44,21 @@ struct ThreadSidebar: View {
 
       Spacer()
 
+      // Add project button
       Button {
-        Task { await createNewThread() }
+        if let path = store.showFolderPicker() {
+          Task { await store.addProject(path: path) }
+        }
+      } label: {
+        Image(systemName: "folder.badge.plus")
+          .font(.system(size: 13))
+          .foregroundStyle(.secondary)
+      }
+      .buttonStyle(.plain)
+      .help("Add project folder")
+
+      Button {
+        Task { _ = await store.createThreadInheritingContext() }
       } label: {
         Image(systemName: "plus.message")
           .font(.system(size: 14, weight: .medium))
@@ -51,8 +66,7 @@ struct ThreadSidebar: View {
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .help("New thread")
-      .keyboardShortcut("n", modifiers: .command)
+      .help("New thread (⌘N)")
     }
     .padding(.horizontal, T3Design.Spacing.lg)
     .padding(.top, T3Design.Spacing.lg)
@@ -83,32 +97,16 @@ struct ThreadSidebar: View {
   private var threadList: some View {
     ScrollView {
       LazyVStack(spacing: 2) {
+        // Desktop update status
+        if let updateState = runtimeModel.snapshot.updateState {
+          updateBanner(updateState)
+        }
+
         if store.activeProjects.isEmpty && filteredThreads.isEmpty {
           emptyState
         } else {
           ForEach(store.activeProjects) { project in
-            ProjectSection(
-              project: project,
-              threads: filteredThreads.filter { $0.projectId == project.id },
-              selectedThreadId: store.selectedThreadId,
-              hoveredThreadId: hoveredThreadId,
-              renamingThreadId: renamingThreadId,
-              renameText: $renameText,
-              onSelect: { store.selectedThreadId = $0 },
-              onHover: { hoveredThreadId = $0 },
-              onDelete: { id in Task { await store.deleteThread(id) } },
-              onStartRename: { id in
-                renamingThreadId = id
-                renameText = filteredThreads.first { $0.id == id }?.title ?? ""
-              },
-              onCommitRename: { id in
-                Task {
-                  await store.renameThread(id, title: renameText)
-                  renamingThreadId = nil
-                }
-              },
-              onCancelRename: { renamingThreadId = nil }
-            )
+            projectSection(project)
           }
 
           let orphanThreads = filteredThreads.filter { thread in
@@ -117,27 +115,7 @@ struct ThreadSidebar: View {
           if !orphanThreads.isEmpty {
             Section {
               ForEach(orphanThreads) { thread in
-                ThreadRow(
-                  thread: thread,
-                  isSelected: store.selectedThreadId == thread.id,
-                  isHovered: hoveredThreadId == thread.id,
-                  isRenaming: renamingThreadId == thread.id,
-                  renameText: $renameText,
-                  onSelect: { store.selectedThreadId = thread.id },
-                  onHover: { hoveredThreadId = $0 ? thread.id : nil },
-                  onDelete: { Task { await store.deleteThread(thread.id) } },
-                  onStartRename: {
-                    renamingThreadId = thread.id
-                    renameText = thread.title
-                  },
-                  onCommitRename: {
-                    Task {
-                      await store.renameThread(thread.id, title: renameText)
-                      renamingThreadId = nil
-                    }
-                  },
-                  onCancelRename: { renamingThreadId = nil }
-                )
+                threadRow(thread)
               }
             } header: {
               Text("Threads")
@@ -153,6 +131,258 @@ struct ThreadSidebar: View {
     }
   }
 
+  // MARK: - Update Banner
+
+  @ViewBuilder
+  private func updateBanner(_ state: String) -> some View {
+    let isUpdateAvailable = state.contains("available") || state.contains("downloaded")
+    if isUpdateAvailable {
+      HStack(spacing: T3Design.Spacing.sm) {
+        Image(systemName: "arrow.down.circle.fill")
+          .font(.system(size: 13))
+          .foregroundStyle(state.contains("downloaded") ? T3Design.successGreen : T3Design.warningAmber)
+
+        VStack(alignment: .leading, spacing: 1) {
+          Text(state.contains("downloaded") ? "Update ready" : "Update available")
+            .font(T3Design.Fonts.caption)
+          Text("Restart to apply")
+            .font(T3Design.Fonts.codeSmall)
+            .foregroundStyle(.tertiary)
+        }
+
+        Spacer()
+      }
+      .padding(.horizontal, T3Design.Spacing.lg)
+      .padding(.vertical, T3Design.Spacing.sm)
+      .background(T3Design.warningAmber.opacity(0.06), in: RoundedRectangle(cornerRadius: T3Design.Radius.md))
+      .padding(.horizontal, T3Design.Spacing.sm)
+    }
+  }
+
+  // MARK: - Project section
+
+  @ViewBuilder
+  private func projectSection(_ project: OrchestrationProject) -> some View {
+    let threads = filteredThreads.filter { $0.projectId == project.id }
+    let isExpanded = store.expandedProjects.contains(project.id)
+    let showAll = store.projectShowAll[project.id] ?? false
+    let maxVisible = 6
+    let visibleThreads = showAll ? threads : Array(threads.prefix(maxVisible))
+
+    VStack(spacing: 0) {
+      // Project header
+      Button {
+        withAnimation(T3Design.Animation.quick) {
+          if isExpanded {
+            store.expandedProjects.remove(project.id)
+          } else {
+            store.expandedProjects.insert(project.id)
+          }
+        }
+      } label: {
+        HStack(spacing: 4) {
+          Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .frame(width: 14)
+
+          Image(systemName: "folder.fill")
+            .font(.system(size: 12))
+            .foregroundStyle(T3Design.accentPurple)
+
+          Text(project.title)
+            .font(T3Design.Fonts.captionMedium)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+
+          Spacer()
+
+          // Scripts menu
+          if !project.scripts.isEmpty {
+            ProjectScriptsControl(store: store, project: project)
+          }
+
+          Text("\(threads.count)")
+            .font(T3Design.Fonts.caption)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, T3Design.Spacing.lg)
+        .padding(.vertical, T3Design.Spacing.xs)
+      }
+      .buttonStyle(.plain)
+      .contextMenu {
+        Button("Add Script…") {
+          // Open script editor for this project
+        }
+        Divider()
+        Button("Delete Project", role: .destructive) {
+          store.pendingDeleteProjectId = project.id
+        }
+        .disabled(!threads.isEmpty)
+      }
+
+      if isExpanded {
+        ForEach(visibleThreads) { thread in
+          threadRow(thread)
+        }
+
+        if threads.count > maxVisible {
+          Button {
+            store.projectShowAll[project.id] = !showAll
+          } label: {
+            Text(showAll ? "Show less" : "Show \(threads.count - maxVisible) more…")
+              .font(T3Design.Fonts.caption)
+              .foregroundStyle(.secondary)
+          }
+          .buttonStyle(.plain)
+          .padding(.horizontal, T3Design.Spacing.xl)
+          .padding(.vertical, T3Design.Spacing.xxs)
+        }
+      }
+    }
+  }
+
+  // MARK: - Thread Row
+
+  private func threadRow(_ thread: OrchestrationThread) -> some View {
+    let isSelected = store.selectedThreadId == thread.id
+    let isHovered = hoveredThreadId == thread.id
+    let isRenaming = renamingThreadId == thread.id
+    let status = store.threadStatus(thread)
+
+    return Button {
+      store.selectedThreadId = thread.id
+    } label: {
+      HStack(spacing: T3Design.Spacing.sm) {
+        // Status indicator
+        threadStatusIndicator(status)
+
+        VStack(alignment: .leading, spacing: 2) {
+          if isRenaming {
+            TextField("Thread name", text: $renameText, onCommit: {
+              Task {
+                await store.renameThread(thread.id, title: renameText)
+                renamingThreadId = nil
+              }
+            })
+            .textFieldStyle(.plain)
+            .font(T3Design.Fonts.body)
+            .onExitCommand { renamingThreadId = nil }
+          } else {
+            Text(thread.title)
+              .font(T3Design.Fonts.body)
+              .foregroundStyle(.primary)
+              .lineLimit(1)
+
+            if let preview = thread.messages.last?.text.prefix(60).trimmingCharacters(in: .whitespacesAndNewlines),
+              !preview.isEmpty
+            {
+              Text(preview)
+                .font(T3Design.Fonts.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            }
+          }
+        }
+
+        Spacer(minLength: 0)
+
+        // Right-side indicators
+        HStack(spacing: 4) {
+          // PR badge
+          if let gitStatus = store.gitStatusByThread[thread.id], let prState = gitStatus.prState {
+            prBadge(prState, url: gitStatus.prUrl)
+          }
+
+          // Relative timestamp
+          Text(relativeTime(thread.updatedAt))
+            .font(T3Design.Fonts.codeSmall)
+            .foregroundStyle(.quaternary)
+
+          if status == .working {
+            ProgressView()
+              .scaleEffect(0.5)
+              .frame(width: 14, height: 14)
+          }
+        }
+      }
+      .padding(.horizontal, T3Design.Spacing.md)
+      .padding(.vertical, T3Design.Spacing.sm)
+      .background(
+        RoundedRectangle(cornerRadius: T3Design.Radius.md, style: .continuous)
+          .fill(isSelected ? T3Design.Colors.sidebarActive : (isHovered ? T3Design.Colors.sidebarHover : .clear))
+      )
+      .padding(.horizontal, T3Design.Spacing.sm)
+    }
+    .buttonStyle(.plain)
+    .onHover { hoveredThreadId = $0 ? thread.id : nil }
+    .contextMenu {
+      Button("Rename…") {
+        renamingThreadId = thread.id
+        renameText = thread.title
+      }
+
+      Button("Copy Thread ID") {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(thread.id, forType: .string)
+      }
+
+      Divider()
+
+      Button("Delete", role: .destructive) {
+        if store.settings.confirmThreadDelete {
+          store.pendingDeleteThreadId = thread.id
+        } else {
+          Task { await store.deleteThread(thread.id) }
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func threadStatusIndicator(_ status: ThreadStatusKind) -> some View {
+    switch status {
+    case .working:
+      PulsingDot(color: T3Design.infoBlue)
+    case .connecting:
+      PulsingDot(color: T3Design.infoBlue)
+    case .completed:
+      Circle()
+        .fill(T3Design.successGreen)
+        .frame(width: 6, height: 6)
+    case .pendingApproval:
+      Circle()
+        .fill(T3Design.warningAmber)
+        .frame(width: 6, height: 6)
+    case .terminalRunning:
+      Image(systemName: "terminal")
+        .font(.system(size: 8))
+        .foregroundStyle(Color.teal)
+    case .idle:
+      Color.clear.frame(width: 6, height: 6)
+    }
+  }
+
+  @ViewBuilder
+  private func prBadge(_ state: GitPRState, url: String?) -> some View {
+    let color: Color = {
+      switch state {
+      case .open: return T3Design.successGreen
+      case .merged: return T3Design.accentPurple
+      case .closed: return .secondary
+      }
+    }()
+
+    Image(systemName: "arrow.triangle.pull")
+      .font(.system(size: 8))
+      .foregroundStyle(color)
+      .onTapGesture {
+        if let url, let nsURL = URL(string: url) {
+          NSWorkspace.shared.open(nsURL)
+        }
+      }
+  }
+
   // MARK: - Empty State
 
   private var emptyState: some View {
@@ -165,11 +395,21 @@ struct ThreadSidebar: View {
         .font(T3Design.Fonts.body)
         .foregroundStyle(.secondary)
 
-      Button("Create a thread") {
-        Task { await createNewThread() }
+      VStack(spacing: T3Design.Spacing.sm) {
+        Button("Create a thread") {
+          Task { _ = await store.createThreadInheritingContext() }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+
+        Button("Add project folder…") {
+          if let path = store.showFolderPicker() {
+            Task { await store.addProject(path: path) }
+          }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
       }
-      .buttonStyle(.bordered)
-      .controlSize(.small)
     }
     .frame(maxWidth: .infinity)
     .padding(.top, 48)
@@ -186,6 +426,16 @@ struct ThreadSidebar: View {
           .foregroundStyle(.secondary)
       }
       Spacer()
+
+      Button {
+        store.showSettings = true
+      } label: {
+        Image(systemName: "gearshape")
+          .font(.system(size: 12))
+          .foregroundStyle(.tertiary)
+      }
+      .buttonStyle(.plain)
+      .help("Settings (⌘,)")
     }
     .padding(.horizontal, T3Design.Spacing.lg)
     .padding(.vertical, T3Design.Spacing.sm)
@@ -204,176 +454,33 @@ struct ThreadSidebar: View {
     }
   }
 
-  // MARK: - Actions
+  // MARK: - Helpers
 
-  private func createNewThread() async {
-    guard let project = store.activeProjects.first else { return }
-    _ = await store.createThread(projectId: project.id)
+  private func relativeTime(_ iso: String) -> String {
+    let formatter = ISO8601DateFormatter()
+    guard let date = formatter.date(from: iso) else { return "" }
+    let interval = Date().timeIntervalSince(date)
+    if interval < 60 { return "now" }
+    if interval < 3600 { return "\(Int(interval / 60))m" }
+    if interval < 86400 { return "\(Int(interval / 3600))h" }
+    return "\(Int(interval / 86400))d"
   }
 }
 
-// MARK: - Project Section
+// MARK: - Pulsing Dot (enhanced)
 
-private struct ProjectSection: View {
-  let project: OrchestrationProject
-  let threads: [OrchestrationThread]
-  let selectedThreadId: ThreadId?
-  let hoveredThreadId: ThreadId?
-  let renamingThreadId: ThreadId?
-  @Binding var renameText: String
-  let onSelect: (ThreadId) -> Void
-  let onHover: (ThreadId?) -> Void
-  let onDelete: (ThreadId) -> Void
-  let onStartRename: (ThreadId) -> Void
-  let onCommitRename: (ThreadId) -> Void
-  let onCancelRename: () -> Void
-
-  @State private var isExpanded = true
+struct PulsingDot: View {
+  var color: Color = T3Design.accentPurple
+  @State private var isPulsing = false
 
   var body: some View {
-    DisclosureGroup(isExpanded: $isExpanded) {
-      ForEach(threads) { thread in
-        ThreadRow(
-          thread: thread,
-          isSelected: selectedThreadId == thread.id,
-          isHovered: hoveredThreadId == thread.id,
-          isRenaming: renamingThreadId == thread.id,
-          renameText: $renameText,
-          onSelect: { onSelect(thread.id) },
-          onHover: { onHover($0 ? thread.id : nil) },
-          onDelete: { onDelete(thread.id) },
-          onStartRename: { onStartRename(thread.id) },
-          onCommitRename: { onCommitRename(thread.id) },
-          onCancelRename: onCancelRename
-        )
-      }
-    } label: {
-      HStack(spacing: T3Design.Spacing.sm) {
-        Image(systemName: "folder.fill")
-          .font(.system(size: 12))
-          .foregroundStyle(T3Design.accentPurple)
-
-        Text(project.title)
-          .font(T3Design.Fonts.captionMedium)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-
-        Spacer()
-
-        Text("\(threads.count)")
-          .font(T3Design.Fonts.caption)
-          .foregroundStyle(.tertiary)
-      }
-      .padding(.horizontal, T3Design.Spacing.lg)
-      .padding(.vertical, T3Design.Spacing.xs)
-    }
-    .disclosureGroupStyle(SidebarDisclosureStyle())
-  }
-}
-
-// MARK: - Thread Row
-
-struct ThreadRow: View {
-  let thread: OrchestrationThread
-  let isSelected: Bool
-  let isHovered: Bool
-  let isRenaming: Bool
-  @Binding var renameText: String
-  let onSelect: () -> Void
-  let onHover: (Bool) -> Void
-  let onDelete: () -> Void
-  let onStartRename: () -> Void
-  let onCommitRename: () -> Void
-  let onCancelRename: () -> Void
-
-  private var isActive: Bool {
-    thread.session?.status == .running || thread.session?.status == .ready
-  }
-
-  private var lastMessagePreview: String? {
-    thread.messages.last?.text.prefix(60).trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  var body: some View {
-    Button(action: onSelect) {
-      HStack(spacing: T3Design.Spacing.sm) {
-        if isActive {
-          StatusDot(T3Design.successGreen, size: 6)
-        }
-
-        VStack(alignment: .leading, spacing: 2) {
-          if isRenaming {
-            TextField("Thread name", text: $renameText, onCommit: onCommitRename)
-              .textFieldStyle(.plain)
-              .font(T3Design.Fonts.body)
-              .onExitCommand(perform: onCancelRename)
-          } else {
-            Text(thread.title)
-              .font(T3Design.Fonts.body)
-              .foregroundStyle(.primary)
-              .lineLimit(1)
-
-            if let preview = lastMessagePreview {
-              Text(preview)
-                .font(T3Design.Fonts.caption)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-            }
-          }
-        }
-
-        Spacer(minLength: 0)
-
-        if thread.latestTurn?.state == .running {
-          ProgressView()
-            .scaleEffect(0.5)
-            .frame(width: 14, height: 14)
-        }
-      }
-      .padding(.horizontal, T3Design.Spacing.md)
-      .padding(.vertical, T3Design.Spacing.sm)
-      .background(
-        RoundedRectangle(cornerRadius: T3Design.Radius.md, style: .continuous)
-          .fill(isSelected ? T3Design.Colors.sidebarActive : (isHovered ? T3Design.Colors.sidebarHover : .clear))
-      )
-      .padding(.horizontal, T3Design.Spacing.sm)
-    }
-    .buttonStyle(.plain)
-    .onHover { onHover($0) }
-    .contextMenu {
-      Button("Rename…") { onStartRename() }
-      Divider()
-      Button("Delete", role: .destructive) { onDelete() }
-    }
-  }
-}
-
-// MARK: - Custom Disclosure Style
-
-struct SidebarDisclosureStyle: DisclosureGroupStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    VStack(spacing: 0) {
-      Button {
-        withAnimation(T3Design.Animation.quick) {
-          configuration.isExpanded.toggle()
-        }
-      } label: {
-        HStack(spacing: 4) {
-          Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .frame(width: 14)
-
-          configuration.label
-        }
-      }
-      .buttonStyle(.plain)
-
-      if configuration.isExpanded {
-        configuration.content
-          .transition(.opacity.combined(with: .move(edge: .top)))
-      }
-    }
+    Circle()
+      .fill(color)
+      .frame(width: 6, height: 6)
+      .scaleEffect(isPulsing ? 1.3 : 1.0)
+      .opacity(isPulsing ? 0.6 : 1.0)
+      .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulsing)
+      .onAppear { isPulsing = true }
   }
 }
 #endif

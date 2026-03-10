@@ -7,12 +7,12 @@ import T3CodeMacOSRuntime
 struct T3CodeMacOSApp: App {
   @StateObject private var runtimeModel = DesktopRuntimeModel()
   @StateObject private var appStore = AppStore()
-  @State private var showSettings = false
 
   var body: some Scene {
     WindowGroup {
       MainLayout(store: appStore, runtimeModel: runtimeModel)
-        .frame(minWidth: 840, minHeight: 620)
+        .frame(minWidth: 900, minHeight: 640)
+        .preferredColorScheme(preferredColorScheme)
         .task {
           await runtimeModel.start()
           if let wsURL = runtimeModel.snapshot.websocketURL {
@@ -28,27 +28,48 @@ struct T3CodeMacOSApp: App {
           appStore.transport.disconnect()
           runtimeModel.stop()
         }
-        .sheet(isPresented: $showSettings) {
-          SettingsView(store: appStore)
-        }
     }
     .windowResizability(.contentMinSize)
     .windowToolbarStyle(.unified(showsTitle: false))
     .commands {
       CommandGroup(replacing: .newItem) {
         Button("New Thread") {
+          Task { _ = await appStore.createThreadInheritingContext() }
+        }
+        .keyboardShortcut("n", modifiers: .command)
+
+        Button("New Thread (Local)") {
           Task {
             guard let project = appStore.activeProjects.first else { return }
             _ = await appStore.createThread(projectId: project.id)
           }
         }
-        .keyboardShortcut("n", modifiers: .command)
+        .keyboardShortcut("n", modifiers: [.command, .shift])
       }
 
       CommandGroup(after: .appSettings) {
-        Button("Settings…") { showSettings = true }
+        Button("Settings…") { appStore.showSettings = true }
           .keyboardShortcut(",", modifiers: .command)
       }
+
+      CommandGroup(after: .sidebar) {
+        Button("Toggle Diff Panel") { appStore.showDiffPanel.toggle() }
+          .keyboardShortcut("d", modifiers: [.command, .shift])
+
+        Button("Toggle Plan") { appStore.showPlanSidebar.toggle() }
+          .keyboardShortcut("p", modifiers: [.command, .shift])
+
+        Button("Toggle Terminal") { appStore.showTerminalDrawer.toggle() }
+          .keyboardShortcut("`", modifiers: .command)
+      }
+    }
+  }
+
+  private var preferredColorScheme: ColorScheme? {
+    switch appStore.settings.theme {
+    case .system: nil
+    case .light: .light
+    case .dark: .dark
     }
   }
 }
@@ -60,20 +81,64 @@ struct MainLayout: View {
   @ObservedObject var runtimeModel: DesktopRuntimeModel
 
   var body: some View {
-    NavigationSplitView {
-      ThreadSidebar(store: store)
-        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
-    } detail: {
-      if let thread = store.selectedThread {
-        ChatView(store: store, thread: thread)
-          .id(thread.id)
-      } else if runtimeModel.snapshot.lifecycle == .running || store.isHydrated {
-        EmptyStateView(store: store)
-      } else {
-        startupView
+    ZStack {
+      NavigationSplitView {
+        ThreadSidebar(store: store, runtimeModel: runtimeModel)
+          .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+      } detail: {
+        if let thread = store.selectedThread {
+          chatDetailView(thread: thread)
+        } else if runtimeModel.snapshot.lifecycle == .running || store.isHydrated {
+          EmptyStateView(store: store)
+        } else {
+          startupView
+        }
       }
+      .navigationSplitViewStyle(.balanced)
+
+      // Toast overlay
+      ToastOverlay(store: store)
     }
-    .navigationSplitViewStyle(.balanced)
+    .sheet(isPresented: $store.showSettings) {
+      SettingsView(store: store)
+    }
+    .modifier(DeleteThreadDialog(store: store, threadId: $store.pendingDeleteThreadId))
+    .modifier(DeleteProjectDialog(store: store, projectId: $store.pendingDeleteProjectId))
+  }
+
+  @ViewBuilder
+  private func chatDetailView(thread: OrchestrationThread) -> some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 0) {
+        // Main chat area
+        VStack(spacing: 0) {
+          ChatView(store: store, thread: thread)
+            .id(thread.id)
+
+          if store.showTerminalDrawer {
+            TerminalDrawer(store: store, thread: thread)
+              .transition(.move(edge: .bottom))
+          }
+        }
+
+        // Right sidebars
+        if store.showDiffPanel {
+          Divider()
+          DiffPanel(store: store, thread: thread)
+            .frame(width: store.diffPanelWidth)
+            .transition(.move(edge: .trailing))
+        }
+
+        if store.showPlanSidebar {
+          Divider()
+          PlanSidebar(store: store, thread: thread)
+            .transition(.move(edge: .trailing))
+        }
+      }
+      .animation(T3Design.Animation.smooth, value: store.showDiffPanel)
+      .animation(T3Design.Animation.smooth, value: store.showPlanSidebar)
+      .animation(T3Design.Animation.smooth, value: store.showTerminalDrawer)
+    }
   }
 
   private var startupView: some View {

@@ -9,7 +9,6 @@ struct ChatView: View {
   @State private var composerText = ""
   @State private var scrollProxy: ScrollViewProxy?
   @State private var isAutoScrolling = true
-  @State private var showDiffPanel = false
   @Namespace private var bottomAnchor
 
   private var timelineEntries: [TimelineEntry] {
@@ -62,56 +61,93 @@ struct ChatView: View {
   // MARK: - Header
 
   private var chatHeader: some View {
-    HStack(spacing: T3Design.Spacing.md) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(thread.title)
-          .font(T3Design.Fonts.headline)
-          .lineLimit(1)
+    VStack(spacing: 0) {
+      HStack(spacing: T3Design.Spacing.md) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(thread.title)
+            .font(T3Design.Fonts.headline)
+            .lineLimit(1)
+
+          HStack(spacing: T3Design.Spacing.sm) {
+            if let project = store.projects.first(where: { $0.id == thread.projectId }) {
+              Label(project.title, systemImage: "folder")
+                .font(T3Design.Fonts.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if let branch = thread.branch {
+              Label(branch, systemImage: "arrow.triangle.branch")
+                .font(T3Design.Fonts.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Text(thread.model)
+              .font(T3Design.Fonts.codeSmall)
+              .foregroundStyle(.tertiary)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(.quaternary, in: Capsule())
+          }
+        }
+
+        Spacer()
 
         HStack(spacing: T3Design.Spacing.sm) {
-          if let project = store.projects.first(where: { $0.id == thread.projectId }) {
-            Label(project.title, systemImage: "folder")
-              .font(T3Design.Fonts.caption)
-              .foregroundStyle(.secondary)
+          if isRunning {
+            runningIndicator
           }
 
-          if let branch = thread.branch {
-            Label(branch, systemImage: "arrow.triangle.branch")
-              .font(T3Design.Fonts.caption)
-              .foregroundStyle(.secondary)
+          runtimeModeToggle
+
+          // Toggle buttons for panels
+          Button {
+            store.showDiffPanel.toggle()
+          } label: {
+            Image(systemName: "doc.text.magnifyingglass")
+              .font(.system(size: 13))
           }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .help("Toggle diff panel (⌘⇧D)")
 
-          Text(thread.model)
-            .font(T3Design.Fonts.codeSmall)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
+          Button {
+            store.showPlanSidebar.toggle()
+          } label: {
+            Image(systemName: "list.bullet.clipboard")
+              .font(.system(size: 13))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .help("Toggle plan (⌘⇧P)")
+
+          Button {
+            if !store.showTerminalDrawer {
+              if (store.terminalsByThread[thread.id] ?? []).isEmpty {
+                store.addTerminal(for: thread.id)
+              }
+            }
+            store.showTerminalDrawer.toggle()
+          } label: {
+            Image(systemName: "terminal")
+              .font(.system(size: 13))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .help("Toggle terminal (⌘`)")
         }
       }
+      .padding(.horizontal, T3Design.Spacing.xl)
+      .padding(.vertical, T3Design.Spacing.md)
 
-      Spacer()
-
-      HStack(spacing: T3Design.Spacing.sm) {
-        if isRunning {
-          runningIndicator
-        }
-
-        runtimeModeToggle
-
-        Button {
-          showDiffPanel.toggle()
-        } label: {
-          Image(systemName: "doc.text.magnifyingglass")
-            .font(.system(size: 13))
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .help("Toggle diff panel")
+      // Branch toolbar + git actions
+      HStack(spacing: T3Design.Spacing.md) {
+        BranchToolbar(store: store, thread: thread)
+        Spacer()
+        GitActionsControl(store: store, thread: thread)
       }
+      .padding(.horizontal, T3Design.Spacing.xl)
+      .padding(.bottom, T3Design.Spacing.sm)
     }
-    .padding(.horizontal, T3Design.Spacing.xl)
-    .padding(.vertical, T3Design.Spacing.md)
     .background(.bar)
   }
 
@@ -597,20 +633,6 @@ struct ActivityRow: View {
 }
 
 // MARK: - Animated Components
-
-struct PulsingDot: View {
-  @State private var isPulsing = false
-
-  var body: some View {
-    Circle()
-      .fill(T3Design.accentPurple)
-      .frame(width: 6, height: 6)
-      .scaleEffect(isPulsing ? 1.3 : 1.0)
-      .opacity(isPulsing ? 0.6 : 1.0)
-      .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulsing)
-      .onAppear { isPulsing = true }
-  }
-}
 
 struct ThinkingIndicator: View {
   @State private var phase = 0.0

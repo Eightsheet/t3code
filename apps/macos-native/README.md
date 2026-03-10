@@ -34,11 +34,24 @@ The shared product/backend surface remains the existing T3 Code server and contr
 - native WebSocket transport and state synchronization
 - native macOS NavigationSplitView layout with project-grouped thread sidebar
 - native macOS app menus and keyboard shortcuts
+- thread status indicators (working, connecting, completed, pending approval, terminal, PR)
+- diff panel with turn-based checkpoint visualization
+- plan sidebar with step tracking, export, and workspace save
+- terminal drawer with multi-tab management and resize
+- git integration (branch toolbar, status tracking, commit, push, pull, PR)
+- project scripts management (create, edit, delete, run)
+- settings (theme, codex paths, models, service tier, keybindings, safety)
+- toast notification system
+- context menus (thread rename/delete/copy ID, project delete)
+- confirmation dialogs for destructive actions
+- composer draft persistence
+- project folder picker and management
+- desktop update status banner in sidebar
+- approval request accept/reject commands
 
 ## What is still missing before this is a fully functional app
 
-- terminal emulator integration in native macOS (SwiftTerm or equivalent)
-- diff panel with syntax-highlighted file changes
+- terminal emulator integration (SwiftTerm or equivalent for real xterm I/O)
 - native deep-link/protocol handling and full window lifecycle parity
 - feature parity validation against the existing Electron desktop app
 
