@@ -1,6 +1,7 @@
 #if canImport(SwiftUI) && os(macOS)
 import Foundation
 import SwiftUI
+import T3CodeMacOSRuntime
 
 // MARK: - App Store
 
@@ -55,6 +56,7 @@ final class AppStore: ObservableObject {
   @Published var welcomeProjectName: String?
 
   let transport = WebSocketTransport()
+  private let snapshotSyncCoalescer = AsyncChangeCoalescer(debounceMilliseconds: 75)
 
   init() {
     settings = AppSettings.load()
@@ -106,9 +108,7 @@ final class AppStore: ObservableObject {
     transport.connect(to: url)
 
     transport.onPush(channel: "orchestration.domainEvent") { [weak self] _ in
-      Task { @MainActor in
-        await self?.syncSnapshot()
-      }
+      Task { @MainActor in self?.requestSnapshotSync() }
     }
 
     transport.onPush(channel: "server.welcome") { [weak self] data in
@@ -120,7 +120,7 @@ final class AppStore: ObservableObject {
             self?.selectedThreadId = threadId
           }
         }
-        await self?.syncSnapshot()
+        self?.requestSnapshotSync()
       }
     }
 
@@ -128,7 +128,13 @@ final class AppStore: ObservableObject {
 
     Task {
       try? await Task.sleep(nanoseconds: 500_000_000)
-      await syncSnapshot()
+      await MainActor.run { requestSnapshotSync() }
+    }
+  }
+
+  private func requestSnapshotSync() {
+    snapshotSyncCoalescer.signal { [weak self] in
+      await self?.syncSnapshot()
     }
   }
 
@@ -143,6 +149,10 @@ final class AppStore: ObservableObject {
         let resultData = try? JSONSerialization.data(withJSONObject: resultValue),
         let snapshot = try? JSONDecoder().decode(OrchestrationReadModel.self, from: resultData)
       else {
+        return
+      }
+
+      if isHydrated, snapshot.snapshotSequence == snapshotSequence {
         return
       }
 
