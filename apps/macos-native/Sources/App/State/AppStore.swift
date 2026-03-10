@@ -381,7 +381,7 @@ final class AppStore: ObservableObject {
         await fetchGitStatus(for: threadId)
         return
       } catch {
-        // Fall through to the backend path for parity with older runtimes.
+        logNativeGitFallback(operation: "commit", threadId: threadId, error: error)
       }
     }
 
@@ -405,7 +405,7 @@ final class AppStore: ObservableObject {
         await fetchGitStatus(for: threadId)
         return
       } catch {
-        // Fall through to the backend path for parity with older runtimes.
+        logNativeGitFallback(operation: "push", threadId: threadId, error: error)
       }
     }
 
@@ -429,7 +429,7 @@ final class AppStore: ObservableObject {
         await fetchGitStatus(for: threadId)
         return
       } catch {
-        // Fall through to the backend path for parity with older runtimes.
+        logNativeGitFallback(operation: "pull", threadId: threadId, error: error)
       }
     }
 
@@ -453,7 +453,7 @@ final class AppStore: ObservableObject {
         await fetchGitBranches(for: threadId)
         return
       } catch {
-        // Fall through to the backend path for parity with older runtimes.
+        logNativeGitFallback(operation: "checkout", threadId: threadId, error: error)
       }
     }
 
@@ -538,6 +538,10 @@ final class AppStore: ObservableObject {
       return worktreePath
     }
     return projects.first(where: { $0.id == thread.projectId })?.workspaceRoot
+  }
+
+  private func logNativeGitFallback(operation: String, threadId: ThreadId, error: Error) {
+    NSLog("native git %@ failed for thread %@: %@", operation, threadId, error.localizedDescription)
   }
 }
 
