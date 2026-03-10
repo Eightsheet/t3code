@@ -38,7 +38,8 @@ The shared product/backend surface remains the existing T3 Code server and contr
 - diff panel with turn-based checkpoint visualization
 - plan sidebar with step tracking, export, and workspace save
 - terminal drawer with multi-tab management and resize
-- git integration (branch toolbar, status tracking, commit, push, pull, PR)
+- git integration UI (branch toolbar, status tracking, commit, push, pull, PR)
+- native git CLI execution for branch listing, status refresh, commit, push, pull, and checkout
 - project scripts management (create, edit, delete, run)
 - settings (theme, codex paths, models, service tier, keybindings, safety)
 - toast notification system
@@ -51,6 +52,7 @@ The shared product/backend surface remains the existing T3 Code server and contr
 
 ## What is still missing before this is a fully functional app
 
+- a Swift replacement for the remaining Node backend orchestration, provider-session, and WebSocket server surface
 - terminal emulator integration (SwiftTerm or equivalent for real xterm I/O)
 - native deep-link/protocol handling and full window lifecycle parity
 - feature parity validation against the existing Electron desktop app

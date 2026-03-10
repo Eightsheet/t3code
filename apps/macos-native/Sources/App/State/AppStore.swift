@@ -1,6 +1,7 @@
 #if canImport(SwiftUI) && os(macOS)
 import Foundation
 import SwiftUI
+import T3CodeMacOSRuntime
 
 // MARK: - App Store
 
@@ -55,6 +56,9 @@ final class AppStore: ObservableObject {
   @Published var welcomeProjectName: String?
 
   let transport = WebSocketTransport()
+  private let nativeGitService = DesktopNativeGitService()
+  private let nativeCheckpointDiffService = DesktopNativeCheckpointDiffService()
+  private let snapshotSyncCoalescer = AsyncChangeCoalescer(debounceMilliseconds: 75)
 
   init() {
     settings = AppSettings.load()
@@ -106,9 +110,7 @@ final class AppStore: ObservableObject {
     transport.connect(to: url)
 
     transport.onPush(channel: "orchestration.domainEvent") { [weak self] _ in
-      Task { @MainActor in
-        await self?.syncSnapshot()
-      }
+      Task { @MainActor in self?.requestSnapshotSync() }
     }
 
     transport.onPush(channel: "server.welcome") { [weak self] data in
@@ -120,7 +122,7 @@ final class AppStore: ObservableObject {
             self?.selectedThreadId = threadId
           }
         }
-        await self?.syncSnapshot()
+        self?.requestSnapshotSync()
       }
     }
 
@@ -128,7 +130,13 @@ final class AppStore: ObservableObject {
 
     Task {
       try? await Task.sleep(nanoseconds: 500_000_000)
-      await syncSnapshot()
+      await MainActor.run { requestSnapshotSync() }
+    }
+  }
+
+  private func requestSnapshotSync() {
+    snapshotSyncCoalescer.signal { [weak self] in
+      await self?.syncSnapshot()
     }
   }
 
@@ -140,8 +148,19 @@ final class AppStore: ObservableObject {
       )
 
       guard let resultValue = response.result?.value,
-        let resultData = try? JSONSerialization.data(withJSONObject: resultValue),
-        let snapshot = try? JSONDecoder().decode(OrchestrationReadModel.self, from: resultData)
+        let resultData = try? JSONSerialization.data(withJSONObject: resultValue)
+      else {
+        return
+      }
+
+      if isHydrated,
+        let nextSnapshot = try? JSONDecoder().decode(SnapshotSequenceEnvelope.self, from: resultData),
+        nextSnapshot.snapshotSequence == snapshotSequence
+      {
+        return
+      }
+
+      guard let snapshot = try? JSONDecoder().decode(OrchestrationReadModel.self, from: resultData)
       else {
         return
       }
@@ -296,6 +315,29 @@ final class AppStore: ObservableObject {
   // MARK: - Git integration
 
   func fetchGitStatus(for threadId: ThreadId) async {
+    if let cwd = gitWorkingDirectory(for: threadId),
+      let nativeStatus = try? await nativeGitService.status(cwd: cwd)
+    {
+      let previousStatus = gitStatusByThread[threadId]
+      gitStatusByThread[threadId] = GitStatus(
+        branch: nativeStatus.branch,
+        ahead: nativeStatus.aheadCount,
+        behind: nativeStatus.behindCount,
+        hasChanges: nativeStatus.hasWorkingTreeChanges,
+        changedFiles: nativeStatus.changedFiles.map {
+          GitChangedFile(
+            path: $0.path,
+            status: $0.status,
+            additions: $0.insertions,
+            deletions: $0.deletions
+          )
+        },
+        prState: previousStatus?.prState,
+        prUrl: previousStatus?.prUrl
+      )
+      return
+    }
+
     do {
       let response = try await transport.send(
         method: "git.getStatus",
@@ -310,6 +352,15 @@ final class AppStore: ObservableObject {
   }
 
   func fetchGitBranches(for threadId: ThreadId) async {
+    if let cwd = gitWorkingDirectory(for: threadId),
+      let nativeBranches = try? await nativeGitService.branches(cwd: cwd)
+    {
+      gitBranches = nativeBranches.map {
+        GitBranch(name: $0.name, isCurrent: $0.isCurrent, isDefault: $0.isDefault)
+      }
+      return
+    }
+
     do {
       let response = try await transport.send(
         method: "git.getBranches",
@@ -324,6 +375,17 @@ final class AppStore: ObservableObject {
   }
 
   func gitCommit(threadId: ThreadId, message: String) async {
+    if let cwd = gitWorkingDirectory(for: threadId) {
+      do {
+        try await nativeGitService.commitAllChanges(cwd: cwd, message: message)
+        addToast(.success("Changes committed"))
+        await fetchGitStatus(for: threadId)
+        return
+      } catch {
+        logNativeGitFallback(operation: "commit", threadId: threadId, error: error)
+      }
+    }
+
     do {
       _ = try await transport.send(
         method: "git.commit",
@@ -337,6 +399,17 @@ final class AppStore: ObservableObject {
   }
 
   func gitPush(threadId: ThreadId) async {
+    if let cwd = gitWorkingDirectory(for: threadId) {
+      do {
+        try await nativeGitService.pushCurrentBranch(cwd: cwd)
+        addToast(.success("Pushed to remote"))
+        await fetchGitStatus(for: threadId)
+        return
+      } catch {
+        logNativeGitFallback(operation: "push", threadId: threadId, error: error)
+      }
+    }
+
     do {
       _ = try await transport.send(
         method: "git.push",
@@ -350,6 +423,17 @@ final class AppStore: ObservableObject {
   }
 
   func gitPull(threadId: ThreadId) async {
+    if let cwd = gitWorkingDirectory(for: threadId) {
+      do {
+        try await nativeGitService.pullCurrentBranch(cwd: cwd)
+        addToast(.success("Pulled from remote"))
+        await fetchGitStatus(for: threadId)
+        return
+      } catch {
+        logNativeGitFallback(operation: "pull", threadId: threadId, error: error)
+      }
+    }
+
     do {
       _ = try await transport.send(
         method: "git.pull",
@@ -363,6 +447,17 @@ final class AppStore: ObservableObject {
   }
 
   func gitCheckoutBranch(threadId: ThreadId, branch: String) async {
+    if let cwd = gitWorkingDirectory(for: threadId) {
+      do {
+        try await nativeGitService.checkoutBranch(cwd: cwd, branch: branch)
+        await fetchGitStatus(for: threadId)
+        await fetchGitBranches(for: threadId)
+        return
+      } catch {
+        logNativeGitFallback(operation: "checkout", threadId: threadId, error: error)
+      }
+    }
+
     do {
       _ = try await transport.send(
         method: "git.checkoutBranch",
@@ -377,6 +472,40 @@ final class AppStore: ObservableObject {
   // MARK: - Diff fetching
 
   func fetchDiffs(for threadId: ThreadId, turnId: TurnId? = nil) async -> [FileDiff] {
+    if let cwd = gitWorkingDirectory(for: threadId),
+      let checkpointRefs = checkpointDiffRefs(for: threadId, turnId: turnId),
+      let nativeDiffs = try? await nativeCheckpointDiffService.diff(
+        cwd: cwd,
+        fromCheckpointRef: checkpointRefs.from,
+        toCheckpointRef: checkpointRefs.to
+      )
+    {
+      return nativeDiffs.map { diff in
+        FileDiff(
+          path: diff.path,
+          oldPath: diff.oldPath,
+          kind: diff.kind,
+          additions: diff.additions,
+          deletions: diff.deletions,
+          hunks: diff.hunks.enumerated().map { hunkIndex, hunk in
+            DiffHunk(
+              id: "\(diff.path)-hunk-\(hunkIndex)",
+              header: hunk.header,
+              lines: hunk.lines.enumerated().map { lineIndex, line in
+                DiffLine(
+                  id: "\(diff.path)-hunk-\(hunkIndex)-line-\(lineIndex)",
+                  type: line.type,
+                  content: line.content,
+                  oldLineNumber: line.oldLineNumber,
+                  newLineNumber: line.newLineNumber
+                )
+              }
+            )
+          }
+        )
+      }
+    }
+
     do {
       var params: [String: Any] = ["_tag": "git.getDiffs", "threadId": threadId]
       if let turnId { params["turnId"] = turnId }
@@ -435,6 +564,59 @@ final class AppStore: ObservableObject {
     panel.prompt = "Add Project"
     return panel.runModal() == .OK ? panel.url?.path : nil
   }
+
+  private func gitWorkingDirectory(for threadId: ThreadId) -> String? {
+    guard let thread = threads.first(where: { $0.id == threadId }) else {
+      return nil
+    }
+    if let worktreePath = thread.worktreePath, worktreePath.isEmpty == false {
+      return worktreePath
+    }
+    return projects.first(where: { $0.id == thread.projectId })?.workspaceRoot
+  }
+
+  private func checkpointDiffRefs(for threadId: ThreadId, turnId: TurnId?) -> (from: String, to: String)? {
+    guard let thread = threads.first(where: { $0.id == threadId }),
+      let checkpoints = thread.checkpoints,
+      checkpoints.isEmpty == false
+    else {
+      return nil
+    }
+
+    let selectedCheckpoint: CheckpointSummary?
+    if let turnId {
+      selectedCheckpoint = checkpoints.first(where: { $0.turnId == turnId })
+    } else {
+      selectedCheckpoint = checkpoints.max(by: { lhs, rhs in
+        lhs.checkpointTurnCount < rhs.checkpointTurnCount
+      })
+    }
+
+    guard let targetCheckpoint = selectedCheckpoint else {
+      return nil
+    }
+    guard targetCheckpoint.checkpointTurnCount >= 0 else {
+      assertionFailure("checkpointTurnCount must not be negative")
+      return nil
+    }
+
+    let fromTurnCount =
+      targetCheckpoint.checkpointTurnCount == 0 ? 0 : targetCheckpoint.checkpointTurnCount - 1
+    let fromRef: String
+    if fromTurnCount == 0 {
+      fromRef = desktopCheckpointRefForThreadTurn(threadId, turnCount: 0)
+    } else if let previousCheckpoint = checkpoints.first(where: { $0.checkpointTurnCount == fromTurnCount }) {
+      fromRef = previousCheckpoint.checkpointRef
+    } else {
+      return nil
+    }
+
+    return (from: fromRef, to: targetCheckpoint.checkpointRef)
+  }
+
+  private func logNativeGitFallback(operation: String, threadId: ThreadId, error: Error) {
+    NSLog("native git %@ failed for thread %@: %@", operation, threadId, error.localizedDescription)
+  }
 }
 
 // MARK: - Thread Status
@@ -446,6 +628,10 @@ enum ThreadStatusKind {
   case completed
   case pendingApproval
   case terminalRunning
+}
+
+private struct SnapshotSequenceEnvelope: Decodable {
+  let snapshotSequence: Int
 }
 
 // MARK: - Toast Message

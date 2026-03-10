@@ -59,7 +59,8 @@ public struct DesktopMigrationStatus: Equatable, Sendable {
       "Diff panel with turn-based checkpoint visualization in Swift",
       "Plan sidebar with step tracking, export, and workspace save in Swift",
       "Terminal drawer with multi-tab management and resize in Swift",
-      "Git integration (branch toolbar, status tracking, commit, push, pull, PR) in Swift",
+      "Git integration UI (branch toolbar, status tracking, commit, push, pull, PR) in Swift",
+      "Native git CLI execution for branch listing, status refresh, commit, push, pull, and checkout in Swift",
       "Project scripts management (create, edit, delete, icon picker, run-on-create) in Swift",
       "Settings (theme, codex paths, models, service tier, keybindings, safety) in Swift",
       "Toast notification system with auto-dismiss in Swift",
@@ -72,6 +73,7 @@ public struct DesktopMigrationStatus: Equatable, Sendable {
       "Approval request accept/reject commands in Swift",
     ],
     missingForFullApp: [
+      "Swift replacement for the remaining Node backend orchestration, provider-session, and WebSocket server surface",
       "Terminal emulator integration (SwiftTerm or equivalent for real xterm I/O)",
       "Deep-link/protocol handling and full window lifecycle parity",
       "Feature parity validation against the existing Electron desktop app",
