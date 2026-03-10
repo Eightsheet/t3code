@@ -146,13 +146,20 @@ final class AppStore: ObservableObject {
       )
 
       guard let resultValue = response.result?.value,
-        let resultData = try? JSONSerialization.data(withJSONObject: resultValue),
-        let snapshot = try? JSONDecoder().decode(OrchestrationReadModel.self, from: resultData)
+        let resultData = try? JSONSerialization.data(withJSONObject: resultValue)
       else {
         return
       }
 
-      if isHydrated, snapshot.snapshotSequence == snapshotSequence {
+      if isHydrated,
+        let nextSnapshot = try? JSONDecoder().decode(SnapshotSequenceEnvelope.self, from: resultData),
+        nextSnapshot.snapshotSequence == snapshotSequence
+      {
+        return
+      }
+
+      guard let snapshot = try? JSONDecoder().decode(OrchestrationReadModel.self, from: resultData)
+      else {
         return
       }
 
@@ -456,6 +463,10 @@ enum ThreadStatusKind {
   case completed
   case pendingApproval
   case terminalRunning
+}
+
+private struct SnapshotSequenceEnvelope: Decodable {
+  let snapshotSequence: Int
 }
 
 // MARK: - Toast Message

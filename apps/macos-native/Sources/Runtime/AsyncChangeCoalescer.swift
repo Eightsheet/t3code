@@ -14,8 +14,8 @@ public final class AsyncChangeCoalescer {
     isDirty = true
     guard runnerTask == nil else { return }
 
-    runnerTask = Task { @MainActor [weak self] in
-      await self?.drain(operation)
+    runnerTask = Task { @MainActor in
+      await self.drain(operation)
     }
   }
 
