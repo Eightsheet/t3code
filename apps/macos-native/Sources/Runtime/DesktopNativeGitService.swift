@@ -5,6 +5,17 @@ public enum DesktopNativeGitServiceError: Error, Equatable, Sendable {
   case invalidUTF8(command: String)
   case notGitRepository
   case detachedHead
+
+  init(runnerError: DesktopNativeGitCommandRunnerError) {
+    switch runnerError {
+    case let .commandFailed(command, message):
+      self = .commandFailed(command: command, message: message)
+    case let .invalidUTF8(command):
+      self = .invalidUTF8(command: command)
+    case .notGitRepository:
+      self = .notGitRepository
+    }
+  }
 }
 
 public struct DesktopNativeGitChangedFile: Equatable, Sendable {
@@ -57,14 +68,10 @@ public struct DesktopNativeGitBranch: Equatable, Identifiable, Sendable {
 }
 
 public actor DesktopNativeGitService {
-  private let environment: [String: String]
+  private let commandRunner: DesktopNativeGitCommandRunner
 
   public init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-    var resolvedEnvironment = environment
-    if let inheritedPath = LoginShellPathResolver.resolve(environment: environment) {
-      resolvedEnvironment["PATH"] = inheritedPath
-    }
-    self.environment = resolvedEnvironment
+    self.commandRunner = DesktopNativeGitCommandRunner(environment: environment)
   }
 
   public func status(cwd: String) throws -> DesktopNativeGitStatus {
@@ -259,47 +266,11 @@ public actor DesktopNativeGitService {
     arguments: [String],
     commandName: String
   ) throws -> (stdout: String, stderr: String) {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/env", isDirectory: false)
-    process.arguments = ["git"] + arguments
-    process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
-    process.environment = environment
-
-    let stdoutPipe = Pipe()
-    let stderrPipe = Pipe()
-    process.standardOutput = stdoutPipe
-    process.standardError = stderrPipe
-
     do {
-      try process.run()
-    } catch {
-      throw DesktopNativeGitServiceError.commandFailed(
-        command: commandName,
-        message: error.localizedDescription
-      )
+      return try commandRunner.run(cwd: cwd, arguments: arguments, commandName: commandName)
+    } catch let error as DesktopNativeGitCommandRunnerError {
+      throw DesktopNativeGitServiceError(runnerError: error)
     }
-    process.waitUntilExit()
-
-    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-    guard let stdout = String(data: stdoutData, encoding: .utf8),
-      let stderr = String(data: stderrData, encoding: .utf8)
-    else {
-      throw DesktopNativeGitServiceError.invalidUTF8(command: commandName)
-    }
-
-    guard process.terminationStatus == 0 else {
-      let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-      if message.localizedCaseInsensitiveContains("not a git repository") {
-        throw DesktopNativeGitServiceError.notGitRepository
-      }
-      throw DesktopNativeGitServiceError.commandFailed(
-        command: commandName,
-        message: message.isEmpty ? "Command failed with status \(process.terminationStatus)." : message
-      )
-    }
-
-    return (stdout, stderr)
   }
 
   private static func parseBranchLine(_ line: Substring) -> (name: String, isCurrent: Bool)? {

@@ -57,6 +57,7 @@ final class AppStore: ObservableObject {
 
   let transport = WebSocketTransport()
   private let nativeGitService = DesktopNativeGitService()
+  private let nativeCheckpointDiffService = DesktopNativeCheckpointDiffService()
   private let snapshotSyncCoalescer = AsyncChangeCoalescer(debounceMilliseconds: 75)
 
   init() {
@@ -471,6 +472,40 @@ final class AppStore: ObservableObject {
   // MARK: - Diff fetching
 
   func fetchDiffs(for threadId: ThreadId, turnId: TurnId? = nil) async -> [FileDiff] {
+    if let cwd = gitWorkingDirectory(for: threadId),
+      let checkpointRefs = checkpointDiffRefs(for: threadId, turnId: turnId),
+      let nativeDiffs = try? await nativeCheckpointDiffService.diff(
+        cwd: cwd,
+        fromCheckpointRef: checkpointRefs.from,
+        toCheckpointRef: checkpointRefs.to
+      )
+    {
+      return nativeDiffs.map { diff in
+        FileDiff(
+          path: diff.path,
+          oldPath: diff.oldPath,
+          kind: diff.kind,
+          additions: diff.additions,
+          deletions: diff.deletions,
+          hunks: diff.hunks.enumerated().map { hunkIndex, hunk in
+            DiffHunk(
+              id: "\(diff.path)-hunk-\(hunkIndex)",
+              header: hunk.header,
+              lines: hunk.lines.enumerated().map { lineIndex, line in
+                DiffLine(
+                  id: "\(diff.path)-hunk-\(hunkIndex)-line-\(lineIndex)",
+                  type: line.type,
+                  content: line.content,
+                  oldLineNumber: line.oldLineNumber,
+                  newLineNumber: line.newLineNumber
+                )
+              }
+            )
+          }
+        )
+      }
+    }
+
     do {
       var params: [String: Any] = ["_tag": "git.getDiffs", "threadId": threadId]
       if let turnId { params["turnId"] = turnId }
@@ -538,6 +573,45 @@ final class AppStore: ObservableObject {
       return worktreePath
     }
     return projects.first(where: { $0.id == thread.projectId })?.workspaceRoot
+  }
+
+  private func checkpointDiffRefs(for threadId: ThreadId, turnId: TurnId?) -> (from: String, to: String)? {
+    guard let thread = threads.first(where: { $0.id == threadId }),
+      let checkpoints = thread.checkpoints,
+      checkpoints.isEmpty == false
+    else {
+      return nil
+    }
+
+    let selectedCheckpoint: CheckpointSummary?
+    if let turnId {
+      selectedCheckpoint = checkpoints.first(where: { $0.turnId == turnId })
+    } else {
+      selectedCheckpoint = checkpoints.max(by: { lhs, rhs in
+        lhs.checkpointTurnCount < rhs.checkpointTurnCount
+      })
+    }
+
+    guard let targetCheckpoint = selectedCheckpoint else {
+      return nil
+    }
+    guard targetCheckpoint.checkpointTurnCount >= 0 else {
+      assertionFailure("checkpointTurnCount must not be negative")
+      return nil
+    }
+
+    let fromTurnCount =
+      targetCheckpoint.checkpointTurnCount == 0 ? 0 : targetCheckpoint.checkpointTurnCount - 1
+    let fromRef: String
+    if fromTurnCount == 0 {
+      fromRef = desktopCheckpointRefForThreadTurn(threadId, turnCount: 0)
+    } else if let previousCheckpoint = checkpoints.first(where: { $0.checkpointTurnCount == fromTurnCount }) {
+      fromRef = previousCheckpoint.checkpointRef
+    } else {
+      return nil
+    }
+
+    return (from: fromRef, to: targetCheckpoint.checkpointRef)
   }
 
   private func logNativeGitFallback(operation: String, threadId: ThreadId, error: Error) {
