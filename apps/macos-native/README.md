@@ -30,12 +30,15 @@ The shared product/backend surface remains the existing T3 Code server and contr
 - desktop update state machine and polling orchestration in Swift
 - GitHub release manifest parsing, update download, and install handoff in Swift
 - backend lifecycle restart/shutdown orchestration in Swift
+- native SwiftUI chat UI with sidebar, message timeline, and composer
+- native WebSocket transport and state synchronization
+- native macOS NavigationSplitView layout with project-grouped thread sidebar
+- native macOS app menus and keyboard shortcuts
 
 ## What is still missing before this is a fully functional app
 
-- the real native session/conversation UI instead of the current status shell
-- native client orchestration for the full app flow
-- native menus, dialogs, folder picking, and context menus
+- terminal emulator integration in native macOS (SwiftTerm or equivalent)
+- diff panel with syntax-highlighted file changes
 - native deep-link/protocol handling and full window lifecycle parity
 - feature parity validation against the existing Electron desktop app
 

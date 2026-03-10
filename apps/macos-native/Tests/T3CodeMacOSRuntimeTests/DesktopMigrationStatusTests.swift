@@ -11,8 +11,13 @@ final class DesktopMigrationStatusTests: XCTestCase {
     XCTAssertFalse(status.missingForFullApp.isEmpty)
     XCTAssertTrue(status.nativeComponents.contains("Backend process launch/supervision in Swift"))
     XCTAssertTrue(
+      status.nativeComponents.contains(
+        "Native SwiftUI chat UI with sidebar, message timeline, and composer in Swift"
+      )
+    )
+    XCTAssertTrue(
       status.missingForFullApp.contains(
-        "Native renderer UI for sessions, conversations, and event streaming"
+        "Terminal emulator integration in native macOS (SwiftTerm or equivalent)"
       )
     )
   }

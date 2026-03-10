@@ -6,135 +6,98 @@ import T3CodeMacOSRuntime
 @main
 struct T3CodeMacOSApp: App {
   @StateObject private var runtimeModel = DesktopRuntimeModel()
-  private let bootstrap = DesktopRuntimeBootstrapper.prepareOrNil()
-  private let status = DesktopMigrationStatus.current
-  private let runtimeInfo = DesktopRuntimeInfoResolver.current()
-  private let metadata = AppPreviewContext.current.metadata
-  private let staticRoot = AppPreviewContext.current.staticRoot
-  private let updateAvailability = AppPreviewContext.current.updateAvailability
+  @StateObject private var appStore = AppStore()
+  @State private var showSettings = false
 
   var body: some Scene {
     WindowGroup {
-      ContentView(
-        bootstrap: bootstrap,
-        status: status,
-        runtimeInfo: runtimeInfo,
-        metadata: metadata,
-        staticRoot: staticRoot,
-        updateAvailability: updateAvailability,
-        runtimeSnapshot: runtimeModel.snapshot
-      )
-      .frame(minWidth: 960, minHeight: 640)
-      .task {
-        await runtimeModel.start()
-      }
-      .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-        runtimeModel.stop()
-      }
+      MainLayout(store: appStore, runtimeModel: runtimeModel)
+        .frame(minWidth: 840, minHeight: 620)
+        .task {
+          await runtimeModel.start()
+          if let wsURL = runtimeModel.snapshot.websocketURL {
+            appStore.connectToBackend(url: wsURL)
+          }
+        }
+        .onChange(of: runtimeModel.snapshot.websocketURL) { _, newURL in
+          if let url = newURL {
+            appStore.connectToBackend(url: url)
+          }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+          appStore.transport.disconnect()
+          runtimeModel.stop()
+        }
+        .sheet(isPresented: $showSettings) {
+          SettingsView(store: appStore)
+        }
     }
     .windowResizability(.contentMinSize)
-  }
-}
-
-private struct ContentView: View {
-  let bootstrap: DesktopRuntimeConfiguration?
-  let status: DesktopMigrationStatus
-  let runtimeInfo: DesktopRuntimeInfo
-  let metadata: DesktopAppMetadata?
-  let staticRoot: URL?
-  let updateAvailability: String?
-  let runtimeSnapshot: DesktopRuntimeSessionSnapshot
-
-  var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        Text("T3 Code for macOS")
-          .font(.largeTitle.weight(.semibold))
-
-        Text(status.headline)
-          .font(.body)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-
-        StatusCard(
-          title: "Already native in Swift",
-          systemImage: "checkmark.circle",
-          items: status.nativeComponents
-        )
-
-        StatusCard(
-          title: "Still missing before this is a fully functional native app",
-          systemImage: "exclamationmark.triangle",
-          items: status.missingForFullApp
-        )
-
-        Label(status.swiftUIStatus, systemImage: "swift")
-          .font(.headline)
-
-        Divider()
-        Text("Current runtime foundation preview")
-          .font(.title3.weight(.semibold))
-        LabeledContent("Runtime host arch", value: runtimeInfo.hostArch.rawValue)
-        LabeledContent("Runtime app arch", value: runtimeInfo.appArch.rawValue)
-        if let metadata {
-          LabeledContent("Display name", value: metadata.displayName)
-          LabeledContent("User data directory", value: metadata.userDataDirectory.path)
-          LabeledContent("Commit hash", value: metadata.commitHash ?? "unavailable")
+    .windowToolbarStyle(.unified(showsTitle: false))
+    .commands {
+      CommandGroup(replacing: .newItem) {
+        Button("New Thread") {
+          Task {
+            guard let project = appStore.activeProjects.first else { return }
+            _ = await appStore.createThread(projectId: project.id)
+          }
         }
-        LabeledContent("Static bundle root", value: staticRoot?.path ?? "unavailable")
-        LabeledContent("Auto-update readiness", value: updateAvailability ?? "ready for packaged production builds")
-        LabeledContent("Runtime session", value: runtimeSnapshot.lifecycle.rawValue)
-        if let message = runtimeSnapshot.message {
-          LabeledContent("Runtime message", value: message)
-        }
-        if let updateState = runtimeSnapshot.updateState {
-          LabeledContent("Update controller status", value: updateState.status.rawValue)
-        }
-
-        if let bootstrap {
-          Divider()
-          Text("Current bootstrap preview")
-            .font(.title3.weight(.semibold))
-          LabeledContent("Backend entry", value: bootstrap.paths.backendEntry.path)
-          LabeledContent("State directory", value: bootstrap.paths.stateDirectory.path)
-          LabeledContent("WebSocket URL", value: bootstrap.websocketURL.absoluteString)
-        } else {
-          Label(
-            "Bootstrap preview is unavailable in this launch context, but the Swift runtime module is still part of the native app.",
-            systemImage: "info.circle"
-          )
-          .foregroundStyle(.secondary)
-        }
+        .keyboardShortcut("n", modifiers: .command)
       }
-      .padding(24)
-    }
-  }
-}
 
-private struct StatusCard: View {
-  let title: String
-  let systemImage: String
-  let items: [String]
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Label(title, systemImage: systemImage)
-        .font(.title3.weight(.semibold))
-
-      ForEach(items, id: \.self) { item in
-        Label(item, systemImage: "circle.fill")
-          .font(.body)
-          .symbolRenderingMode(.hierarchical)
+      CommandGroup(after: .appSettings) {
+        Button("Settings…") { showSettings = true }
+          .keyboardShortcut(",", modifiers: .command)
       }
     }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
   }
 }
+
+// MARK: - Main Layout
+
+struct MainLayout: View {
+  @ObservedObject var store: AppStore
+  @ObservedObject var runtimeModel: DesktopRuntimeModel
+
+  var body: some View {
+    NavigationSplitView {
+      ThreadSidebar(store: store)
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+    } detail: {
+      if let thread = store.selectedThread {
+        ChatView(store: store, thread: thread)
+          .id(thread.id)
+      } else if runtimeModel.snapshot.lifecycle == .running || store.isHydrated {
+        EmptyStateView(store: store)
+      } else {
+        startupView
+      }
+    }
+    .navigationSplitViewStyle(.balanced)
+  }
+
+  private var startupView: some View {
+    VStack(spacing: T3Design.Spacing.xl) {
+      ProgressView()
+        .scaleEffect(1.2)
+
+      VStack(spacing: T3Design.Spacing.sm) {
+        Text("Starting T3 Code…")
+          .font(T3Design.Fonts.headline)
+
+        Text(runtimeModel.snapshot.message ?? runtimeModel.snapshot.lifecycle.rawValue)
+          .font(T3Design.Fonts.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
+
+// MARK: - Runtime Model
 
 @MainActor
-private final class DesktopRuntimeModel: ObservableObject {
+final class DesktopRuntimeModel: ObservableObject {
   @Published private(set) var snapshot = DesktopRuntimeSessionSnapshot(
     lifecycle: .idle,
     message: nil,
@@ -163,21 +126,15 @@ private final class DesktopRuntimeModel: ObservableObject {
   }
 
   func start() async {
-    guard hasStarted == false, let session else {
-      return
-    }
+    guard hasStarted == false, let session else { return }
     hasStarted = true
     await session.start()
     snapshot = await session.currentSnapshot()
   }
 
   func stop() {
-    guard let session else {
-      return
-    }
-    Task {
-      await session.stop()
-    }
+    guard let session else { return }
+    Task { await session.stop() }
   }
 }
 #else
@@ -196,14 +153,10 @@ struct T3CodeMacOSUnsupportedHost {
     print(status.swiftUIStatus)
     print("")
     print("Already native in Swift:")
-    for item in status.nativeComponents {
-      print("- \(item)")
-    }
+    for item in status.nativeComponents { print("- \(item)") }
     print("")
     print("Still missing before the app is fully functional:")
-    for item in status.missingForFullApp {
-      print("- \(item)")
-    }
+    for item in status.missingForFullApp { print("- \(item)") }
     print("")
     print("Runtime foundation preview:")
     print("- host arch: \(runtimeInfo.hostArch.rawValue)")
