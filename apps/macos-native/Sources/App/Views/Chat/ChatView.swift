@@ -417,69 +417,71 @@ struct MessageBubble: View {
 struct MarkdownTextView: View {
   let text: String
 
-  var body: some View {
-    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-    VStack(alignment: .leading, spacing: T3Design.Spacing.xs) {
-      var inCodeBlock = false
-      var codeBlockContent = ""
-      var codeBlockLang = ""
-
-      ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-        let lineStr = String(line)
-
-        if lineStr.hasPrefix("```") {
-          if inCodeBlock {
-            codeBlockView(content: codeBlockContent, language: codeBlockLang)
-              .onAppear {
-                codeBlockContent = ""
-                codeBlockLang = ""
-              }
-          } else {
-            // Start code block - but we can't mutate in ForEach body for rendering
-            // Use a simpler inline code approach
-          }
+  private var parsedBlocks: [MarkdownBlock] {
+    var blocks: [MarkdownBlock] = []
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    var i = 0
+    while i < lines.count {
+      let line = lines[i]
+      if line.hasPrefix("```") {
+        let lang = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        var codeLines: [String] = []
+        i += 1
+        while i < lines.count && !lines[i].hasPrefix("```") {
+          codeLines.append(lines[i])
+          i += 1
         }
+        blocks.append(.codeBlock(language: lang, content: codeLines.joined(separator: "\n")))
+        i += 1
+      } else {
+        blocks.append(.line(line))
+        i += 1
+      }
+    }
+    return blocks
+  }
 
-        // Simplified markdown rendering
-        if lineStr.hasPrefix("# ") {
-          Text(String(lineStr.dropFirst(2)))
-            .font(.system(size: 18, weight: .bold))
-            .textSelection(.enabled)
-        } else if lineStr.hasPrefix("## ") {
-          Text(String(lineStr.dropFirst(3)))
-            .font(.system(size: 16, weight: .semibold))
-            .textSelection(.enabled)
-        } else if lineStr.hasPrefix("### ") {
-          Text(String(lineStr.dropFirst(4)))
-            .font(.system(size: 14, weight: .semibold))
-            .textSelection(.enabled)
-        } else if lineStr.hasPrefix("- ") || lineStr.hasPrefix("* ") {
-          HStack(alignment: .top, spacing: T3Design.Spacing.sm) {
-            Text("•")
-              .foregroundStyle(.secondary)
-            Text(renderInlineMarkdown(String(lineStr.dropFirst(2))))
-              .font(T3Design.Fonts.body)
-              .textSelection(.enabled)
-          }
-        } else if lineStr.hasPrefix("`") && lineStr.hasSuffix("`") && !lineStr.hasPrefix("```") {
-          let code = lineStr.dropFirst().dropLast()
-          Text(String(code))
-            .font(T3Design.Fonts.code)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(T3Design.Colors.codeBg, in: RoundedRectangle(cornerRadius: 4))
-            .textSelection(.enabled)
-        } else if lineStr.hasPrefix("```") {
-          // code block delimiter — skip in simplified view
-          EmptyView()
-        } else if lineStr.isEmpty {
-          Spacer().frame(height: 4)
-        } else {
-          Text(renderInlineMarkdown(lineStr))
-            .font(T3Design.Fonts.body)
-            .textSelection(.enabled)
+  var body: some View {
+    VStack(alignment: .leading, spacing: T3Design.Spacing.xs) {
+      ForEach(Array(parsedBlocks.enumerated()), id: \.offset) { _, block in
+        switch block {
+        case .codeBlock(let language, let content):
+          codeBlockView(content: content, language: language)
+        case .line(let lineStr):
+          lineView(lineStr)
         }
       }
+    }
+  }
+
+  @ViewBuilder
+  private func lineView(_ lineStr: String) -> some View {
+    if lineStr.hasPrefix("# ") {
+      Text(String(lineStr.dropFirst(2)))
+        .font(.system(size: 18, weight: .bold))
+        .textSelection(.enabled)
+    } else if lineStr.hasPrefix("## ") {
+      Text(String(lineStr.dropFirst(3)))
+        .font(.system(size: 16, weight: .semibold))
+        .textSelection(.enabled)
+    } else if lineStr.hasPrefix("### ") {
+      Text(String(lineStr.dropFirst(4)))
+        .font(.system(size: 14, weight: .semibold))
+        .textSelection(.enabled)
+    } else if lineStr.hasPrefix("- ") || lineStr.hasPrefix("* ") {
+      HStack(alignment: .top, spacing: T3Design.Spacing.sm) {
+        Text("•")
+          .foregroundStyle(.secondary)
+        Text(renderInlineMarkdown(String(lineStr.dropFirst(2))))
+          .font(T3Design.Fonts.body)
+          .textSelection(.enabled)
+      }
+    } else if lineStr.isEmpty {
+      Spacer().frame(height: 4)
+    } else {
+      Text(renderInlineMarkdown(lineStr))
+        .font(T3Design.Fonts.body)
+        .textSelection(.enabled)
     }
   }
 
@@ -508,6 +510,11 @@ struct MarkdownTextView: View {
     // Use SwiftUI's built-in markdown for inline formatting
     (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
   }
+}
+
+private enum MarkdownBlock {
+  case codeBlock(language: String, content: String)
+  case line(String)
 }
 
 // MARK: - Plan Card

@@ -63,7 +63,8 @@ final class WebSocketTransport: ObservableObject, @unchecked Sendable {
       pendingRequests[requestId] = continuation
 
       Task { [weak self] in
-        try? await Task.sleep(nanoseconds: UInt64(60 * 1_000_000_000))
+        let timeout = self?.requestTimeout ?? 60.0
+        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
         await MainActor.run {
           if let cont = self?.pendingRequests.removeValue(forKey: requestId) {
             cont.resume(throwing: TransportError.timeout)

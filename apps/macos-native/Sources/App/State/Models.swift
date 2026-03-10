@@ -210,6 +210,9 @@ struct WsWelcomePayload: Codable, Sendable {
 
 // MARK: - AnyCodable helper
 
+// AnyCodable wraps JSON-decoded values (Bool, Int, Double, String, Array, Dictionary, NSNull).
+// All concrete values stored are either value types or immutable Foundation types, making
+// cross-actor transfer safe despite the `Any` type erasure.
 struct AnyCodable: Codable, @unchecked Sendable {
   let value: Any
 
