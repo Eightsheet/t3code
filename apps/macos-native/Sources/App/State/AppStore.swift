@@ -56,6 +56,7 @@ final class AppStore: ObservableObject {
   @Published var welcomeProjectName: String?
 
   let transport = WebSocketTransport()
+  private let nativeGitService = DesktopNativeGitService()
   private let snapshotSyncCoalescer = AsyncChangeCoalescer(debounceMilliseconds: 75)
 
   init() {
@@ -313,6 +314,29 @@ final class AppStore: ObservableObject {
   // MARK: - Git integration
 
   func fetchGitStatus(for threadId: ThreadId) async {
+    if let cwd = gitWorkingDirectory(for: threadId),
+      let nativeStatus = try? await nativeGitService.status(cwd: cwd)
+    {
+      let previousStatus = gitStatusByThread[threadId]
+      gitStatusByThread[threadId] = GitStatus(
+        branch: nativeStatus.branch,
+        ahead: nativeStatus.aheadCount,
+        behind: nativeStatus.behindCount,
+        hasChanges: nativeStatus.hasWorkingTreeChanges,
+        changedFiles: nativeStatus.changedFiles.map {
+          GitChangedFile(
+            path: $0.path,
+            status: $0.status,
+            additions: $0.insertions,
+            deletions: $0.deletions
+          )
+        },
+        prState: previousStatus?.prState,
+        prUrl: previousStatus?.prUrl
+      )
+      return
+    }
+
     do {
       let response = try await transport.send(
         method: "git.getStatus",
@@ -327,6 +351,15 @@ final class AppStore: ObservableObject {
   }
 
   func fetchGitBranches(for threadId: ThreadId) async {
+    if let cwd = gitWorkingDirectory(for: threadId),
+      let nativeBranches = try? await nativeGitService.branches(cwd: cwd)
+    {
+      gitBranches = nativeBranches.map {
+        GitBranch(name: $0.name, isCurrent: $0.isCurrent, isDefault: $0.isDefault)
+      }
+      return
+    }
+
     do {
       let response = try await transport.send(
         method: "git.getBranches",
@@ -341,6 +374,17 @@ final class AppStore: ObservableObject {
   }
 
   func gitCommit(threadId: ThreadId, message: String) async {
+    if let cwd = gitWorkingDirectory(for: threadId) {
+      do {
+        try await nativeGitService.commitAllChanges(cwd: cwd, message: message)
+        addToast(.success("Changes committed"))
+        await fetchGitStatus(for: threadId)
+        return
+      } catch {
+        // Fall through to the backend path for parity with older runtimes.
+      }
+    }
+
     do {
       _ = try await transport.send(
         method: "git.commit",
@@ -354,6 +398,17 @@ final class AppStore: ObservableObject {
   }
 
   func gitPush(threadId: ThreadId) async {
+    if let cwd = gitWorkingDirectory(for: threadId) {
+      do {
+        try await nativeGitService.pushCurrentBranch(cwd: cwd)
+        addToast(.success("Pushed to remote"))
+        await fetchGitStatus(for: threadId)
+        return
+      } catch {
+        // Fall through to the backend path for parity with older runtimes.
+      }
+    }
+
     do {
       _ = try await transport.send(
         method: "git.push",
@@ -367,6 +422,17 @@ final class AppStore: ObservableObject {
   }
 
   func gitPull(threadId: ThreadId) async {
+    if let cwd = gitWorkingDirectory(for: threadId) {
+      do {
+        try await nativeGitService.pullCurrentBranch(cwd: cwd)
+        addToast(.success("Pulled from remote"))
+        await fetchGitStatus(for: threadId)
+        return
+      } catch {
+        // Fall through to the backend path for parity with older runtimes.
+      }
+    }
+
     do {
       _ = try await transport.send(
         method: "git.pull",
@@ -380,6 +446,17 @@ final class AppStore: ObservableObject {
   }
 
   func gitCheckoutBranch(threadId: ThreadId, branch: String) async {
+    if let cwd = gitWorkingDirectory(for: threadId) {
+      do {
+        try await nativeGitService.checkoutBranch(cwd: cwd, branch: branch)
+        await fetchGitStatus(for: threadId)
+        await fetchGitBranches(for: threadId)
+        return
+      } catch {
+        // Fall through to the backend path for parity with older runtimes.
+      }
+    }
+
     do {
       _ = try await transport.send(
         method: "git.checkoutBranch",
@@ -451,6 +528,16 @@ final class AppStore: ObservableObject {
     panel.message = "Select a project folder"
     panel.prompt = "Add Project"
     return panel.runModal() == .OK ? panel.url?.path : nil
+  }
+
+  private func gitWorkingDirectory(for threadId: ThreadId) -> String? {
+    guard let thread = threads.first(where: { $0.id == threadId }) else {
+      return nil
+    }
+    if let worktreePath = thread.worktreePath, worktreePath.isEmpty == false {
+      return worktreePath
+    }
+    return projects.first(where: { $0.id == thread.projectId })?.workspaceRoot
   }
 }
 
