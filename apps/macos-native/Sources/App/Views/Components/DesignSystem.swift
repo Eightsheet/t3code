@@ -134,4 +134,28 @@ struct KeyboardShortcutBadge: View {
       .background(.quaternary, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
   }
 }
+
+// MARK: - File Status Helpers
+
+enum FileStatusStyle {
+  static func icon(for status: String) -> String {
+    switch status {
+    case "added": "plus.circle.fill"
+    case "deleted": "minus.circle.fill"
+    case "modified": "pencil.circle.fill"
+    case "renamed": "arrow.right.circle.fill"
+    default: "circle.fill"
+    }
+  }
+
+  static func color(for status: String) -> Color {
+    switch status {
+    case "added": T3Design.successGreen
+    case "deleted": T3Design.errorRed
+    case "modified": T3Design.warningAmber
+    case "renamed": T3Design.infoBlue
+    default: .secondary
+    }
+  }
+}
 #endif

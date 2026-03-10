@@ -258,9 +258,9 @@ struct GitActionsControl: View {
           VStack(alignment: .leading, spacing: 4) {
             ForEach(files) { file in
               HStack(spacing: T3Design.Spacing.sm) {
-                Image(systemName: fileStatusIcon(file.status))
+                Image(systemName: FileStatusStyle.icon(for: file.status))
                   .font(.system(size: 10))
-                  .foregroundStyle(fileStatusColor(file.status))
+                  .foregroundStyle(FileStatusStyle.color(for: file.status))
                   .frame(width: 14)
 
                 Text(file.path)
@@ -339,24 +339,6 @@ struct GitActionsControl: View {
       Task { await store.gitPull(threadId: thread.id) }
     case .createPR:
       store.addToast(.info("PR creation opens in your browser"))
-    }
-  }
-
-  private func fileStatusIcon(_ status: String) -> String {
-    switch status {
-    case "added": "plus.circle.fill"
-    case "deleted": "minus.circle.fill"
-    case "modified": "pencil.circle.fill"
-    default: "circle.fill"
-    }
-  }
-
-  private func fileStatusColor(_ status: String) -> Color {
-    switch status {
-    case "added": T3Design.successGreen
-    case "deleted": T3Design.errorRed
-    case "modified": T3Design.warningAmber
-    default: .secondary
     }
   }
 }

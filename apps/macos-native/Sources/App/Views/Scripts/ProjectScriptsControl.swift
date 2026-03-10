@@ -17,7 +17,7 @@ struct ProjectScriptsControl: View {
         Button {
           runScript(script)
         } label: {
-          Label(script.name, systemImage: iconSystemImage(script.icon))
+          Label(script.name, systemImage: ScriptIcon(rawValue: script.icon)?.systemImage ?? "play.fill")
         }
       }
 
@@ -83,19 +83,6 @@ struct ProjectScriptsControl: View {
 
   private func runScript(_ script: ProjectScript) {
     store.addToast(.info("Running \(script.name)…"))
-    // Script execution happens through the backend
-  }
-
-  private func iconSystemImage(_ icon: String) -> String {
-    switch icon {
-    case "play": "play.fill"
-    case "test": "checkmark.circle"
-    case "lint": "wand.and.stars"
-    case "build": "hammer.fill"
-    case "debug": "ant.fill"
-    case "configure": "gearshape.fill"
-    default: "play.fill"
-    }
   }
 }
 
@@ -150,7 +137,7 @@ struct ScriptEditorSheet: View {
               Button {
                 selectedIcon = icon
               } label: {
-                Image(systemName: iconSystemImage(icon))
+                Image(systemName: ScriptIcon(rawValue: icon)?.systemImage ?? "play.fill")
                   .font(.system(size: 16))
                   .frame(width: 36, height: 36)
                   .background(
@@ -210,18 +197,6 @@ struct ScriptEditorSheet: View {
         selectedIcon = script.icon
         runOnCreate = script.runOnWorktreeCreate
       }
-    }
-  }
-
-  private func iconSystemImage(_ icon: String) -> String {
-    switch icon {
-    case "play": "play.fill"
-    case "test": "checkmark.circle"
-    case "lint": "wand.and.stars"
-    case "build": "hammer.fill"
-    case "debug": "ant.fill"
-    case "configure": "gearshape.fill"
-    default: "play.fill"
     }
   }
 }
