@@ -73,6 +73,7 @@ public struct DesktopMigrationStatus: Equatable, Sendable {
       "Approval request accept/reject commands in Swift",
     ],
     missingForFullApp: [
+      "Swift replacement for the remaining Node backend orchestration, provider-session, and WebSocket server surface",
       "Terminal emulator integration (SwiftTerm or equivalent for real xterm I/O)",
       "Deep-link/protocol handling and full window lifecycle parity",
       "Feature parity validation against the existing Electron desktop app",

@@ -17,6 +17,11 @@ final class DesktopMigrationStatusTests: XCTestCase {
     )
     XCTAssertTrue(
       status.missingForFullApp.contains(
+        "Swift replacement for the remaining Node backend orchestration, provider-session, and WebSocket server surface"
+      )
+    )
+    XCTAssertTrue(
+      status.missingForFullApp.contains(
         "Terminal emulator integration (SwiftTerm or equivalent for real xterm I/O)"
       )
     )

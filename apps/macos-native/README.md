@@ -52,6 +52,7 @@ The shared product/backend surface remains the existing T3 Code server and contr
 
 ## What is still missing before this is a fully functional app
 
+- a Swift replacement for the remaining Node backend orchestration, provider-session, and WebSocket server surface
 - terminal emulator integration (SwiftTerm or equivalent for real xterm I/O)
 - native deep-link/protocol handling and full window lifecycle parity
 - feature parity validation against the existing Electron desktop app
