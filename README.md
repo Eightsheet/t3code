@@ -15,6 +15,11 @@ You can also just install the desktop app. It's cooler.
 
 Install the [desktop app from the Releases page](https://github.com/pingdotgg/t3code/releases)
 
+## Desktop platforms
+
+- `apps/macos-native`: native Swift/SwiftUI macOS app workspace
+- `apps/desktop`: Electron desktop app that stays in place for Windows/Linux releases and cross-platform fallback work
+
 ## Some notes
 
 We are very very early in this project. Expect bugs.
