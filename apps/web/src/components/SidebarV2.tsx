@@ -1368,21 +1368,28 @@ export default function SidebarV2() {
   // Prototype: user-set "Later" triage state. Client-only (localStorage) —
   // the real feature would persist via a thread.later.mark command. A mark
   // outranks snooze/settled classification: it is the stronger statement.
-  const [laterThreadKeys, setLaterThreadKeys] = useState<ReadonlySet<string>>(() => {
+  const [laterThreadKeys, setLaterThreadKeys] = useState<ReadonlyMap<string, number>>(() => {
     try {
       const raw = window.localStorage.getItem("t3code:sidebar-later-prototype");
-      return new Set(raw === null ? [] : (JSON.parse(raw) as string[]));
+      if (raw === null) return new Map<string, number>();
+      const parsed = JSON.parse(raw) as string[] | Record<string, number>;
+      // Older prototype builds stored a bare key array; keep those marks.
+      if (Array.isArray(parsed)) return new Map(parsed.map((key, index) => [key, index]));
+      return new Map(Object.entries(parsed));
     } catch {
-      return new Set<string>();
+      return new Map<string, number>();
     }
   });
   const toggleThreadLater = useCallback((threadKey: string) => {
     setLaterThreadKeys((previous) => {
-      const next = new Set(previous);
+      const next = new Map(previous);
       if (next.has(threadKey)) next.delete(threadKey);
-      else next.add(threadKey);
+      else next.set(threadKey, Date.now());
       try {
-        window.localStorage.setItem("t3code:sidebar-later-prototype", JSON.stringify([...next]));
+        window.localStorage.setItem(
+          "t3code:sidebar-later-prototype",
+          JSON.stringify(Object.fromEntries(next)),
+        );
       } catch {
         // Best-effort persistence only.
       }
@@ -1438,7 +1445,14 @@ export default function SidebarV2() {
     }
     return {
       activeThreads: sortThreadsForSidebarV2(active),
-      laterThreads: sortThreadsForSidebarV2(later),
+      // Queue order, oldest mark first: what has waited longest surfaces
+      // on top instead of rotting at the bottom of the shelf.
+      laterThreads: later.toSorted(
+        (left, right) =>
+          (laterThreadKeys.get(scopedThreadKey(scopeThreadRef(left.environmentId, left.id))) ?? 0) -
+          (laterThreadKeys.get(scopedThreadKey(scopeThreadRef(right.environmentId, right.id))) ??
+            0),
+      ),
       // Soonest wake first: "what comes back next" is the shelf's question.
       snoozedThreads: snoozed.toSorted(
         (left, right) =>
@@ -2427,7 +2441,7 @@ export default function SidebarV2() {
               {(() => {
                 const renderThreadRow = (
                   thread: EnvironmentThreadShell,
-                  section: "active" | "snoozed" | "settled",
+                  section: "active" | "later" | "snoozed" | "settled",
                 ) => {
                   const threadKey = scopedThreadKey(
                     scopeThreadRef(thread.environmentId, thread.id),
@@ -2525,7 +2539,7 @@ export default function SidebarV2() {
                         className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
                       >
                         <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                          {laterShelfExpanded ? "Later" : `Later (${laterThreads.length})`}
+                          {`Later (${laterThreads.length})`}
                         </span>
                         <span className="h-px flex-1 bg-amber-500/20 dark:bg-amber-400/15" />
                         <ChevronDownIcon
@@ -2539,7 +2553,7 @@ export default function SidebarV2() {
                     </li>,
                   );
                   for (const thread of visibleLaterThreads) {
-                    items.push(renderThreadRow(thread, "active"));
+                    items.push(renderThreadRow(thread, "later"));
                   }
                 }
                 // Snoozed shelf: between the inbox and Settled — out of the
