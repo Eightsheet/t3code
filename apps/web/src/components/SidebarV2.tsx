@@ -1365,7 +1365,33 @@ export default function SidebarV2() {
   // merging, no optimistic holds. Archived threads remain hidden here —
   // archive keeps its original "remove from sidebar" meaning.
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
-  const { activeThreads, snoozedThreads, settledThreads, snoozeNow } = useMemo(() => {
+  // Prototype: user-set "Later" triage state. Client-only (localStorage) —
+  // the real feature would persist via a thread.later.mark command. A mark
+  // outranks snooze/settled classification: it is the stronger statement.
+  const [laterThreadKeys, setLaterThreadKeys] = useState<ReadonlySet<string>>(() => {
+    try {
+      const raw = window.localStorage.getItem("t3code:sidebar-later-prototype");
+      return new Set(raw === null ? [] : (JSON.parse(raw) as string[]));
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const toggleThreadLater = useCallback((threadKey: string) => {
+    setLaterThreadKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(threadKey)) next.delete(threadKey);
+      else next.add(threadKey);
+      try {
+        window.localStorage.setItem("t3code:sidebar-later-prototype", JSON.stringify([...next]));
+      } catch {
+        // Best-effort persistence only.
+      }
+      return next;
+    });
+  }, []);
+  const laterThreadKeysRef = useRef(laterThreadKeys);
+  laterThreadKeysRef.current = laterThreadKeys;
+  const { activeThreads, laterThreads, snoozedThreads, settledThreads, snoozeNow } = useMemo(() => {
     const now = `${nowMinute}:00.000Z`;
     // Snooze classification uses a REAL clock, not the quantized minute:
     // wake times are second-precise and a woken thread must not linger on
@@ -1380,6 +1406,7 @@ export default function SidebarV2() {
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
     const active: EnvironmentThreadShell[] = [];
+    const later: EnvironmentThreadShell[] = [];
     const snoozed: EnvironmentThreadShell[] = [];
     const settled: EnvironmentThreadShell[] = [];
     for (const thread of visible) {
@@ -1396,7 +1423,9 @@ export default function SidebarV2() {
       // Snooze outranks settled classification: an explicitly snoozed thread
       // belongs to the shelf even if it would also auto-settle (the shelf's
       // wake time is a stronger statement about when it matters again).
-      if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
+      if (laterThreadKeys.has(threadKey)) {
+        later.push(thread);
+      } else if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
         snoozed.push(thread);
       } else if (
         supportsSettlement &&
@@ -1409,6 +1438,7 @@ export default function SidebarV2() {
     }
     return {
       activeThreads: sortThreadsForSidebarV2(active),
+      laterThreads: sortThreadsForSidebarV2(later),
       // Soonest wake first: "what comes back next" is the shelf's question.
       snoozedThreads: snoozed.toSorted(
         (left, right) =>
@@ -1421,6 +1451,7 @@ export default function SidebarV2() {
   }, [
     autoSettleAfterDays,
     changeRequestStateByKey,
+    laterThreadKeys,
     nowMinute,
     scopedProjectKeys,
     serverConfigs,
@@ -1510,9 +1541,20 @@ export default function SidebarV2() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  // The Later shelf is expanded by default: unlike the snoozed shelf it is
+  // a visible to-do list, not a place work disappears into.
+  const [laterShelfExpanded, setLaterShelfExpanded] = useState(true);
+  const toggleLaterShelf = useCallback(() => setLaterShelfExpanded((value) => !value), []);
+  const visibleLaterThreads = laterShelfExpanded ? laterThreads : [];
+
   const orderedThreads = useMemo(
-    () => [...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...activeThreads,
+      ...visibleLaterThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [activeThreads, visibleLaterThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -2021,6 +2063,12 @@ export default function SidebarV2() {
                         },
                   ]
                 : []),
+              {
+                id: "toggle-later",
+                label: laterThreadKeysRef.current.has(threadKey)
+                  ? "Remove from Later"
+                  : "Mark for later",
+              },
               { id: "rename", label: "Rename thread" },
               { id: "mark-unread", label: "Mark unread" },
               { id: "delete", label: "Delete", destructive: true, icon: "trash" },
@@ -2037,6 +2085,10 @@ export default function SidebarV2() {
           return;
         }
         switch (clicked.value) {
+          case "toggle-later": {
+            toggleThreadLater(threadKey);
+            return;
+          }
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.
@@ -2458,6 +2510,38 @@ export default function SidebarV2() {
                 const items: ReactNode[] = activeThreads.map((thread) =>
                   renderThreadRow(thread, "active"),
                 );
+                // Later shelf: the user's own "come back to this" list —
+                // visible by default, between the inbox and Snoozed. Rows
+                // keep the full card treatment: marked work should stay
+                // as present as inbox work, just grouped.
+                if (laterThreads.length > 0) {
+                  items.push(
+                    <li key="later-shelf-header" data-thread-selection-safe className="list-none">
+                      <button
+                        type="button"
+                        onClick={toggleLaterShelf}
+                        aria-expanded={laterShelfExpanded}
+                        data-testid="sidebar-v2-later-shelf-toggle"
+                        className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                      >
+                        <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                          {laterShelfExpanded ? "Later" : `Later (${laterThreads.length})`}
+                        </span>
+                        <span className="h-px flex-1 bg-amber-500/20 dark:bg-amber-400/15" />
+                        <ChevronDownIcon
+                          aria-hidden
+                          className={cn(
+                            "size-3 text-amber-600 transition-transform dark:text-amber-400",
+                            laterShelfExpanded && "rotate-180",
+                          )}
+                        />
+                      </button>
+                    </li>,
+                  );
+                  for (const thread of visibleLaterThreads) {
+                    items.push(renderThreadRow(thread, "active"));
+                  }
+                }
                 // Snoozed shelf: between the inbox and Settled — out of the
                 // way, never gone. The header always renders while anything
                 // is snoozed (the count is the whole footprint when
@@ -2537,7 +2621,11 @@ export default function SidebarV2() {
               ) : null}
             </ul>
           </TooltipProvider>
-          {activeThreads.length + snoozedThreads.length + settledThreads.length === 0 ? (
+          {activeThreads.length +
+            laterThreads.length +
+            snoozedThreads.length +
+            settledThreads.length ===
+          0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               {projects.length === 0 ? (
                 <>
