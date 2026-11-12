@@ -12,6 +12,7 @@ import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { Button } from "../../components/ui/Button";
 import { IconButton } from "../../components/ui/IconButton";
 import { Toolbar } from "../../components/ui/Toolbar";
+import { APP_DRAWN_BAR_MENUS, BarMenuButton } from "../../components/ui/nativeHeaderMenu.ios";
 import { Menu } from "../../components/ui/Menu";
 
 import { useNativeLayoutMetrics } from "../../native/native-layout-metrics";
@@ -234,7 +235,18 @@ export function PullRequestActionToolbar(props: {
       />
     )
   ) : null;
-  const agentControl = showAgentControls ? (
+  const agentControl = !showAgentControls ? null : APP_DRAWN_BAR_MENUS ? (
+    <Toolbar.Custom>
+      <BarMenuButton
+        title="AI helpers"
+        accessibilityLabel={`${shortLabel} agent actions`}
+        icon="ellipsis.bubble"
+        disabled={agent.disabled}
+        actions={agentActions.map((action) => agent.menuAction(action.task))}
+        onSelect={agent.select}
+      />
+    </Toolbar.Custom>
+  ) : (
     <Toolbar.Menu
       identifier="pull-request-agent"
       icon="ellipsis.bubble"
@@ -260,7 +272,7 @@ export function PullRequestActionToolbar(props: {
         ),
       )}
     </Toolbar.Menu>
-  ) : null;
+  );
   const filesControl = (
     <Toolbar.Button
       identifier="workspace-trailing-action"
