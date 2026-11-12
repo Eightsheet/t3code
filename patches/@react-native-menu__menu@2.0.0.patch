@@ -190,7 +190,7 @@ index 5c4e0da4292b15d3a27b5ea1555f11452a470815..381aa8e2900aeb0d2453dba514360304
              }
              self.setup()
          }
-@@ -60,17 +60,98 @@ public class MenuViewImplementation: UIButton {
+@@ -60,17 +60,100 @@ public class MenuViewImplementation: UIButton {
      }
     
      public override func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
@@ -242,7 +242,9 @@ index 5c4e0da4292b15d3a27b5ea1555f11452a470815..381aa8e2900aeb0d2453dba514360304
 +        guard let preview = contentPreview() else {
 +            return super.contextMenuInteraction(interaction, previewForDismissingMenuWithConfiguration: configuration)
 +        }
-+        // A selection usually re-renders the trigger, so fade instead of landing on its old look.
++        // iOS 27 morphs the menu back into a glass pill as a blob that drifts below it and hides the
++        // pill until it settles, so fade there. A selection usually re-renders the trigger, so fade too.
++        if #available(iOS 27.0, *) { return nil }
 +        return didSelectAction ? nil : preview
      }
  
@@ -291,7 +293,7 @@ index 5c4e0da4292b15d3a27b5ea1555f11452a470815..381aa8e2900aeb0d2453dba514360304
      func setup () {
          let menu = UIMenu(title: _title,
              identifier: nil,
-@@ -86,8 +167,102 @@ public class MenuViewImplementation: UIButton {
+@@ -86,8 +169,102 @@ public class MenuViewImplementation: UIButton {
              }
          }
  
@@ -394,7 +396,7 @@ index 5c4e0da4292b15d3a27b5ea1555f11452a470815..381aa8e2900aeb0d2453dba514360304
      }
  
      public override func reactSetFrame(_ frame: CGRect) {
-@@ -124,4 +299,8 @@ public class MenuViewImplementation: UIButton {
+@@ -124,4 +301,8 @@ public class MenuViewImplementation: UIButton {
      @objc func sendMenuOpen() {
          // NO-OP (should be overriden by parent)
      }
